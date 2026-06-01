@@ -1,2 +1,2 @@
 # jENA
-From rENA to jENA: Redeveloping Epistemic Network Analysis for Modern Web-Based Scholarly Tools
+This is the Github Repository for jENA, a JavaScript-based Open ENA too.
