@@ -1,22 +1,24 @@
 # jENA
 
-`jena-js` is a standalone TypeScript and JavaScript implementation of Epistemic Network Analysis (ENA) for browser and Node runtimes. It is used by SENA as a JavaScript-based ENA engine in place of a live rENA/R runtime.
+[![CI](https://github.com/HUDongpin/jENA/actions/workflows/ci.yml/badge.svg)](https://github.com/HUDongpin/jENA/actions/workflows/ci.yml)
 
-The runtime is pure JavaScript. It does not require R, Rserve, OpenCPU, Next.js, React, or a server process to run ENA models. R is used only for development-time golden fixture generation and parity testing against rENA.
+`jena-js` is a standalone TypeScript/JavaScript implementation of [Epistemic Network Analysis](https://www.epistemicnetwork.org/) (ENA) for browser and Node runtimes, ported from and verified against the [rENA](https://cran.r-project.org/package=rENA) R package (0.3.1).
+
+The runtime is pure JavaScript with **zero runtime dependencies**. It does not require R, Rserve, OpenCPU, or a server process to run ENA models. R is used only at development time to generate golden fixtures and verify numerical parity with rENA.
 
 ## Install
 
-From a packed tarball:
-
 ```bash
-npm install ./jena-js-0.1.1.tgz
+npm install github:HUDongpin/jENA
 ```
 
-From this repository workspace:
+or from a packed tarball:
 
 ```bash
-npm install ./vendor/jena-js
+npm install ./jena-js-0.2.0.tgz
 ```
+
+**ESM only.** The package ships ES modules and requires Node ≥ 18 or a bundler; `require("jena-js")` is not supported.
 
 ## Usage
 
@@ -39,67 +41,72 @@ const set = ena({
   dimensions: 2
 });
 
-console.log(set.connectionCounts);
-console.log(set.lineWeights);
-console.log(set.points);
-console.log(set.rotation.nodes);
+console.log(set.points);          // projected unit points (SVD1, SVD2)
+console.log(set.rotation.nodes);  // code node positions
+console.log(set.variance);        // variance explained per rotated dimension
 ```
+
+Note on `variance`: shares are normalized across **all** rotated dimensions (rENA semantics), so `SVD1 + SVD2` generally sums to less than 1. Dimension signs are arbitrary (SVD sign indeterminacy) — compare axes up to sign. See [NUMERICS.md](./NUMERICS.md).
 
 ## Entrypoints
 
 ```ts
-import { ena, accumulateData, makeSet } from "jena-js";
+import { ena, accumulateData, makeSet, projectIn, enaCorrelations, cohensD } from "jena-js";
 import { rowsToCoOccurrences, refWindowMatrix } from "jena-js/core";
 import { createENAPlotModel, toPlotly } from "jena-js/plot";
 import { createENAWorkerClient } from "jena-js/browser";
+// worker bundle: import "jena-js/browser/worker";
 ```
 
-The web worker entrypoint is exported as:
+## Verified vs experimental surface
 
-```ts
-import "jena-js/browser/worker";
-```
+Everything in the **verified** tier is tested against golden outputs generated from rENA 0.3.1 (see `fixtures/goldens/`, version-stamped; tolerances documented in [NUMERICS.md](./NUMERICS.md)).
 
-## Supported Runtime Surface
+| Area | Status | Notes |
+|---|---|---|
+| Accumulation: `EndPoint`, `AccumulatedTrajectory`, `SeparateTrajectory` | ✅ Verified | All 14 golden configs, both fixture datasets |
+| Windows: moving stanza (back/forward/infinite), conversation | ✅ Verified | Line-faithful port of rENA's C++ `ref_window_df` |
+| Weighting: `binary`, `sum` | ✅ Verified | |
+| Sphere normalization, centering | ✅ Verified | Includes rENA's zero-row semantics |
+| SVD rotation, means rotation | ✅ Verified | Points at ~1e-9, rotation matrices up to sign |
+| Variance explained | ✅ Verified | Normalized over all dimensions, 1e-9 vs rENA |
+| Undirected node positions + centroids | ✅ Verified | See NUMERICS.md for singular-system tolerance |
+| `projectIn` (rotation-set reuse) | ✅ Verified | Self-projection invariant + shared machinery |
+| Stats: `enaCorrelations`, `cohensD` | ✅ Verified | vs `rENA::ena.correlations` / `fun_cohens.d` |
+| Stats: Welch t, one-way ANOVA (`enaStats`) | ✅ Verified | vs R `t.test` / `aov`; **no p-values** — statistic + df only |
+| Streaming/chunked accumulation | ⚠️ Equivalence-tested | Matches batch on all golden configs; no independent rENA goldens |
+| Rotations: `generalized`, `regression`, `regression2`, `hena`, `spherical` | 🧪 Experimental | **Not verified against rENA**; elastic-net and formula handling are approximations (see NUMERICS.md) |
+| Directed node positions | 🧪 Experimental | Throws on this pipeline's undirected models; only usable with external n×n directed adjacency data |
+| Plot adapters, SVG renderer | 🧪 Experimental | Untested convenience helpers |
+| Worker client | 🧪 Experimental | Progress/cancel are coarse (single-run granularity); function-valued `weightBy` cannot cross `postMessage` |
 
-The package currently includes:
+If a rotation or statistic will end up in a publication, stay on the ✅ tier or independently validate your configuration against rENA first.
 
-- endpoint, accumulated trajectory, and separate trajectory ENA models;
-- moving stanza and conversation windows;
-- binary and sum weighting;
-- SVD, mean, generalized, regression, HENA-style, and spherical rotation helpers;
-- undirected and directed node-position helpers;
-- lightweight plot model adapters and SVG rendering helpers;
-- browser worker client utilities;
-- development-time R-derived golden fixtures for parity checks.
+## Input validation
+
+Malformed inputs throw descriptive errors instead of producing quietly wrong numbers: empty `rows`, fewer than 2 `codes`, negative/fractional window sizes, wrong-shape masks, misspelled `model`/`window`/`weightBy`/`rotation.method`/`nodePositionMethod` values, `dimensions < 1`, and `unitsUsed` filters that match nothing are all rejected.
 
 ## Development
 
 ```bash
 npm install
+npm run lint
 npm run typecheck
 npm test
 npm run build
+npm run pack:check
 ```
 
-Generate R-derived golden fixtures when R and rENA are available:
+Golden fixtures are committed, so tests run without R. To regenerate them (requires R with rENA installed):
 
 ```bash
-npm run goldens:r
+npm run goldens:r       # model fixtures -> sena-configs.regenerated.json
+npm run goldens:diff    # compare regenerated vs committed at 1e-9
+npm run goldens:stats   # stats fixtures (correlations, cohen's d, t/F tests)
 ```
 
-Then run the JavaScript parity tests:
+See [fixtures/goldens/README.md](./fixtures/goldens/README.md) for the regenerate → diff → adopt workflow. CI runs lint, typecheck, tests, build, a packaging check, and a packed-tarball consumer smoke test on Node 18/20/22.
 
-```bash
-npm test
-```
+## Provenance and license
 
-R is not part of the package runtime path. The generated JSON fixtures are committed so ordinary JavaScript testing does not require R.
-
-## Provenance
-
-See [PROVENANCE.md](./PROVENANCE.md) for source history, rENA relationship, and runtime notes.
-
-## License
-
-GPL-3.0-only. This package is a JavaScript port derived from and validated against GPL-compatible rENA behavior, and preserves that licensing posture.
+`jena-js` is a TypeScript translation of core [rENA](https://cran.r-project.org/package=rENA) behavior — rENA 0.3.1 (GPL-3) by Cody L Marquart, Zachari Swiecki, Wesley Collier, Brendan Eagan, Roman Woodward, and David Williamson Shaffer. This package is distributed under **GPL-3.0-only**, preserving the upstream license. See [PROVENANCE.md](./PROVENANCE.md) for the upstream version pin, source history, and file-level attribution, and [NUMERICS.md](./NUMERICS.md) for documented numerical deviations and agreement bounds.

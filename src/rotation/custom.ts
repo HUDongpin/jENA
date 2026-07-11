@@ -1,3 +1,12 @@
+/*
+ * Derived from rENA 0.3.1 (GPL-3), (c) the rENA authors: Cody L Marquart,
+ * Zachari Swiecki, Wesley Collier, Brendan Eagan, Roman Woodward, and
+ * David Williamson Shaffer. This file ports R/ena.rotate.by.mean.R; the
+ * generalized/regression/hena/spherical rotations are unverified
+ * approximations of their R counterparts.
+ * TypeScript translation and modifications for jena-js, GPL-3.0-only.
+ * See PROVENANCE.md for the upstream NOTICE and version pin.
+ */
 import type {
   ENAData,
   GeneralizedRotationParams,

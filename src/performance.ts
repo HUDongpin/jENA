@@ -1,3 +1,11 @@
+/*
+ * Derived from rENA 0.3.1 (GPL-3), (c) the rENA authors: Cody L Marquart,
+ * Zachari Swiecki, Wesley Collier, Brendan Eagan, Roman Woodward, and
+ * David Williamson Shaffer. This file is a streaming re-implementation of
+ * the rENA window/accumulation semantics in src/ena.cpp.
+ * TypeScript translation and modifications for jena-js, GPL-3.0-only.
+ * See PROVENANCE.md for the upstream NOTICE and version pin.
+ */
 import type { AccumulateOptions, ENAData, Matrix, ModelType, Row, Scalar, WeightBy, WindowType } from './types.js';
 import {
   adjacencyKey,
