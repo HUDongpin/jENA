@@ -60,6 +60,10 @@ What cannot be verified: rENA selects lambda via `cv.glmnet`, which **randomizes
 
 `spherical` has **no rENA counterpart** (verified against the rENA 0.3.1 source). It anchors the first axis at a chosen adjacency direction (a co-occurrence column name or custom vector), orthogonalizes an optional secondary anchor against it, and completes the basis orthogonally. Its spec — anchor semantics, orthonormality, variance conservation — is locked by unit tests rather than rENA goldens.
 
+## Custom weight functions (F-019, resolved)
+
+Function-valued `weightBy` is applied once per windowed co-occurrence cell, BEFORE unit accumulation, receiving a single-element array. This matches rENA's runtime behavior exactly (golden-verified with a `sqrt` weighting on both datasets): rENA's implementation applies `weight.by` with `by = 1:nrow(...)`, so the function sees each row's cell as a length-1 vector — despite its docstring saying the function is applied "after accumulation" (a documentation bug, reported upstream). Consequently rENA's `weight.by = sum` is the identity on raw window products, which is what jena's `"sum"` string does. Cross-window aggregation semantics (e.g. `max` over a unit's windows) are deliberately NOT what `weightBy` means; if ever needed, that belongs to a new explicitly-named option.
+
 ## Formula parsing
 
 R model formulas in the regression rotations are parsed by a simplified parser (`~`, `+`, `:` only — no `*`, `poly()`, or nested calls). Unsupported syntax is rejected loudly rather than mis-parsed.

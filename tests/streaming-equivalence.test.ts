@@ -57,7 +57,9 @@ if (!existsSync(fixturePath)) {
             codes: spec.codes,
             metadata: spec.metadata,
             model: config.options.model as never,
-            weightBy: config.options.weightBy as never,
+            weightBy: (config.options.weightBy === "sqrt"
+              ? (values: number[]) => Math.sqrt(values[0] ?? 0)
+              : config.options.weightBy) as never,
             window: config.options.window as never,
             windowSizeBack: config.options.windowSizeBack as number,
             windowSizeForward: config.options.windowSizeForward as number

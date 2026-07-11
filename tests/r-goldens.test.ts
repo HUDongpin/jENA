@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { accumulateData, ena, refWindowMatrix, rowsToCoOccurrences, sphereNorm } from "../src/index.js";
-import type { Matrix, Row } from "../src/index.js";
+import type { Matrix, Row, WeightBy } from "../src/index.js";
 import {
   codeColumns,
   expectMatrixClose,
@@ -12,10 +12,17 @@ import {
 
 const fixturePath = new URL("../fixtures/goldens/sena-configs.generated.json", import.meta.url);
 
+// The fixture marks the function-valued weight.by case with "sqrt"; rENA and
+// jena both apply custom weight functions once per windowed co-occurrence
+// cell (rENA groups by row, making each .SD slice a length-1 vector).
+function weightByOption(weightBy: "binary" | "sum" | "sqrt"): WeightBy {
+  return weightBy === "sqrt" ? (values) => Math.sqrt(values[0] ?? 0) : weightBy;
+}
+
 type GoldenConfig = {
   options: {
     model: "EndPoint" | "AccumulatedTrajectory" | "SeparateTrajectory";
-    weightBy: "binary" | "sum";
+    weightBy: "binary" | "sum" | "sqrt";
     window: "MovingStanzaWindow" | "Conversation";
     windowSizeBack: number;
     windowSizeForward: number;
@@ -91,7 +98,7 @@ if (!existsSync(fixturePath)) {
           codes: spec.dataset.codes,
           metadata: spec.metadata,
           model: config.options.model,
-          weightBy: config.options.weightBy,
+          weightBy: weightByOption(config.options.weightBy),
           window: config.options.window,
           windowSizeBack: config.options.windowSizeBack,
           windowSizeForward: config.options.windowSizeForward
@@ -113,7 +120,8 @@ if (!existsSync(fixturePath)) {
           conversation: spec.conversation,
           codes: spec.dataset.codes,
           metadata: spec.metadata,
-          ...config.options
+          ...config.options,
+          weightBy: weightByOption(config.options.weightBy)
         });
 
         expectMatrixClose(matrixFromRows(set.lineWeights, datasetColumns), matrixFromRows(config.lineWeights, datasetColumns), 12);

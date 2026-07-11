@@ -2,7 +2,7 @@
 
 `sena-configs.generated.json` holds golden outputs generated from the upstream
 `rENA` R package (accumulation, line weights, projected points, node
-positions, rotation matrices, and variance for 14 model configurations across
+positions, rotation matrices, and variance for 16 model configurations across
 two datasets, plus low-level kernel fixtures). The JSON is committed so parity
 tests run without R in ordinary JavaScript development environments, and it
 embeds a `meta` block recording the exact generation environment (R, rENA,

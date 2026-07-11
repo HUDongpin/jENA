@@ -84,7 +84,7 @@ result <- tryCatch({
   make_accum <- function(model = "EndPoint", weight_by = "binary",
                          window = "MovingStanzaWindow",
                          window_size_back = 2, window_size_forward = 0) {
-    r_weight_by <- if (identical(weight_by, "sum")) sum else weight_by
+    r_weight_by <- if (identical(weight_by, "sum")) sum else if (identical(weight_by, "sqrt")) function(x) sqrt(x) else weight_by
     rENA::ena.accumulate.data(
       units = toy[, c("unit"), drop = FALSE],
       conversation = toy[, c("conv"), drop = FALSE],
@@ -175,7 +175,7 @@ result <- tryCatch({
   make_research_accum <- function(model = "EndPoint", weight_by = "binary",
                                   window = "MovingStanzaWindow",
                                   window_size_back = 2, window_size_forward = 0) {
-    r_weight_by <- if (identical(weight_by, "sum")) sum else weight_by
+    r_weight_by <- if (identical(weight_by, "sum")) sum else if (identical(weight_by, "sqrt")) function(x) sqrt(x) else weight_by
     rENA::ena.accumulate.data(
       units = research[, c("person"), drop = FALSE],
       conversation = research[, c("team", "stanza"), drop = FALSE],
@@ -234,6 +234,7 @@ result <- tryCatch({
       movingBinary = make_config(),
       movingForward = make_config(window_size_forward = 1),
       movingSum = make_config(weight_by = "sum"),
+      movingSqrt = make_config(weight_by = "sqrt"),
       conversationBinary = make_config(window = "Conversation"),
       accumulatedTrajectory = make_config(model = "AccumulatedTrajectory"),
       separateTrajectory = make_config(model = "SeparateTrajectory"),
@@ -246,6 +247,7 @@ result <- tryCatch({
         personMovingBinary = make_research_config(),
         personMovingForward = make_research_config(window_size_forward = 1),
         personMovingSum = make_research_config(weight_by = "sum"),
+        personMovingSqrt = make_research_config(weight_by = "sqrt"),
         personConversationBinary = make_research_config(window = "Conversation"),
         personAccumulatedTrajectory = make_research_config(model = "AccumulatedTrajectory"),
         personSeparateTrajectory = make_research_config(model = "SeparateTrajectory"),

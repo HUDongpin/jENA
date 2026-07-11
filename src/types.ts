@@ -4,6 +4,17 @@ export type Matrix = number[][];
 
 export type ModelType = "EndPoint" | "AccumulatedTrajectory" | "SeparateTrajectory";
 export type WindowType = "MovingStanzaWindow" | "Conversation";
+/**
+ * Weighting applied to each windowed co-occurrence cell BEFORE unit
+ * accumulation. "binary" thresholds each window's cell to 0/1; "sum" keeps
+ * the raw window products (rENA passes R's `sum`, which is the identity on
+ * its length-1 input). A function is called once per cell with a
+ * single-element array `[value]` and returns the transformed value —
+ * matching rENA's runtime behavior exactly (golden-verified; note rENA's own
+ * docstring says "after accumulation", but its implementation groups by row,
+ * so the function sees one window cell at a time). Functions cannot cross
+ * the worker boundary; the worker API restricts this to the string forms.
+ */
 export type WeightBy = "binary" | "sum" | ((values: number[]) => number);
 
 export type RotationMethod = "svd" | "mean" | "generalized" | "regression" | "regression2" | "hena" | "spherical";
