@@ -1,7 +1,17 @@
 node_modules/
-.DS_Store
+dist/
 coverage/
 .turbo/
 .vite/
 *.log
 *.tgz
+.DS_Store
+.Rhistory
+
+# Local reference copy of upstream rENA (see PROVENANCE.md for the pinned hash)
+rENA-main.zip
+reference/
+
+# Local working documents, not part of the published package
+*.docm
+ADVISORY-REVIEW-*.md
