@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1 - 2026-07-11
+
+- Added `RELEASING.md`: the practiced release checklist (gates, the npm web-2FA timing note, tagging, GitHub release, and the registry-install smoke test), closing the advisory's remaining documentation item (T-16). No runtime changes.
+
 ## 0.6.0 - 2026-07-11
 
 Closes the remaining advisory architecture/performance items (F-007, F-012, F-013, F-014).
