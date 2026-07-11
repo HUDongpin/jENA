@@ -68,12 +68,23 @@ export function lwsLeastSquaresPositions(lineWeights: Matrix, points: Matrix, nu
   return solveNodePositionsFromWeights(weights, points);
 }
 
+function directedNodeCount(adjacencyLength: number, method: string): number {
+  const numNodes = Math.round(Math.sqrt(adjacencyLength));
+  if (numNodes * numNodes !== adjacencyLength) {
+    throw new Error(
+      `${method} requires a directed adjacency with n*n columns per row, got ${adjacencyLength}. ` +
+      'Undirected models produce n*(n-1)/2 upper-triangle columns; use nodePositionMethod: "undirected" for them.'
+    );
+  }
+  return numNodes;
+}
+
 export function directedNodePositions(lineWeights: Matrix, points: Matrix): NodePositionResult {
   if (lineWeights.length !== points.length) {
     throw new Error('lineWeights and points must have the same number of rows.');
   }
   if (points.length === 0) return { nodes: [], centroids: [], weights: [] };
-  const numNodes = Math.ceil(Math.sqrt(lineWeights[0]?.length ?? 0));
+  const numNodes = directedNodeCount(lineWeights[0]?.length ?? 0, 'directedNodePositions');
   return solveNodePositionsFromWeights(directedWeightsFromLineWeights(lineWeights, numNodes), points);
 }
 
@@ -82,7 +93,7 @@ export function directedNodePositionsWithGroundResponseAdded(lineWeights: Matrix
     throw new Error('lineWeights and points must have the same number of rows.');
   }
   if (points.length === 0) return { nodes: [], centroids: [], weights: [] };
-  const numNodes = Math.ceil(Math.sqrt(lineWeights[0]?.length ?? 0));
+  const numNodes = directedNodeCount(lineWeights[0]?.length ?? 0, 'directedNodePositionsWithGroundResponseAdded');
   const weights = directedWeightsFromLineWeights(lineWeights, numNodes);
   const addedWeights: Matrix = [];
   const addedPoints: Matrix = [];

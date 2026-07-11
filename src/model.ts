@@ -149,7 +149,20 @@ function makeRotation(enadata: ENAData, pointsForProjection: Matrix, options: Ma
 }
 
 function makeNodePositions(lineWeights: Matrix, points: Matrix, codeCount: number, options: MakeSetOptions): NodePositionResult {
-  switch (options.nodePositionMethod ?? 'undirected') {
+  const method = options.nodePositionMethod ?? 'undirected';
+  if (method !== 'undirected') {
+    // This pipeline only accumulates undirected upper-triangle adjacency
+    // vectors (n*(n-1)/2 columns); a directed solver needs n*n columns and
+    // would otherwise return silently wrong coordinates (advisory F-003).
+    const width = lineWeights[0]?.length ?? 0;
+    if (width !== codeCount * codeCount) {
+      throw new Error(
+        `nodePositionMethod "${method}" requires a directed adjacency (${codeCount * codeCount} columns for ${codeCount} codes), ` +
+        `but this model is undirected (${width} upper-triangle columns). Use nodePositionMethod: "undirected".`
+      );
+    }
+  }
+  switch (method) {
     case 'undirected':
       return lwsLeastSquaresPositions(lineWeights, points, codeCount);
     case 'directed':
