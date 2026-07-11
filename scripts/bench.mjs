@@ -5,6 +5,12 @@
 import { ena, enaCorrelations } from "../dist/index.js";
 import { symmetricJacobiEigen } from "../dist/core/index.js";
 
+// CI runners (and older V8s) are several times slower than the baseline
+// machine; BENCH_BUDGET_SCALE relaxes the budgets there while local runs
+// stay strict. CI runs the bench on a single pinned Node version.
+const BUDGET_SCALE = Math.max(1, Number(process.env.BENCH_BUDGET_SCALE ?? 1) || 1);
+if (BUDGET_SCALE !== 1) console.log(`budget scale: x${BUDGET_SCALE}`);
+
 function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
@@ -17,11 +23,12 @@ function mulberry32(seed) {
 }
 
 function time(label, budgetMs, run) {
+  const budget = budgetMs * BUDGET_SCALE;
   const start = performance.now();
   const detail = run();
   const elapsed = performance.now() - start;
-  const ok = elapsed <= budgetMs;
-  console.log(`${ok ? "PASS" : "FAIL"}  ${label}: ${elapsed.toFixed(0)} ms (budget ${budgetMs} ms)${detail ? ` — ${detail}` : ""}`);
+  const ok = elapsed <= budget;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${label}: ${elapsed.toFixed(0)} ms (budget ${budget} ms)${detail ? ` — ${detail}` : ""}`);
   return ok;
 }
 
