@@ -9,16 +9,10 @@
 import type {
   ENAData,
   ENASet,
-  GeneralizedRotationParams,
-  HenaRotationParams,
   MakeSetOptions,
   Matrix,
-  MeanRotationParams,
-  RegressionRotationParams,
   Row,
-  RotationOptions,
-  RotationSet,
-  SphericalRotationParams
+  RotationSet
 } from './types.js';
 import { centerData, meanColumns, multiplyMatrices, sphereNorm, varianceColumns } from './core/matrix.js';
 import { validateMakeSetOptions } from './core/validate.js';
@@ -98,34 +92,6 @@ function adjacencyKeysEqual(left: ENAData['adjacencyKey'], right: ENAData['adjac
   });
 }
 
-function meanParams(options: RotationOptions | undefined): MeanRotationParams {
-  const params = options?.params;
-  if (!params || !('groups' in params)) throw new Error('Mean rotation requires rotation.params.groups.');
-  return params;
-}
-
-function generalizedParams(options: RotationOptions | undefined): GeneralizedRotationParams {
-  const params = options?.params;
-  if (!params || !('xVar' in params)) throw new Error('Generalized rotation requires rotation.params.xVar.');
-  return params;
-}
-
-function regressionParams(options: RotationOptions | undefined): RegressionRotationParams {
-  const params = options?.params as RegressionRotationParams | undefined;
-  if (!params || typeof params.xVar !== 'string') throw new Error('Regression rotation requires rotation.params.xVar.');
-  return params;
-}
-
-function henaParams(options: RotationOptions | undefined): HenaRotationParams {
-  const params = options?.params as HenaRotationParams | undefined;
-  if (!params || typeof params.xVar !== 'string') throw new Error('HENA rotation requires rotation.params.xVar.');
-  return params;
-}
-
-function sphericalParams(options: RotationOptions | undefined): SphericalRotationParams {
-  return (options?.params ?? {}) as SphericalRotationParams;
-}
-
 function makeRotation(enadata: ENAData, pointsForProjection: Matrix, options: MakeSetOptions): Pick<RotationSet, 'rotationMatrix' | 'rotationColumns' | 'eigenvalues'> {
   if (options.rotationSet) {
     if (!adjacencyKeysEqual(enadata.adjacencyKey, options.rotationSet.adjacencyKey)) {
@@ -138,22 +104,23 @@ function makeRotation(enadata: ENAData, pointsForProjection: Matrix, options: Ma
     };
   }
 
+  // RotationOptions is a discriminated union, so each branch's params are
+  // narrowed at compile time (advisory F-012 — no casts).
   const rotation = options.rotation;
-  switch (rotation?.method ?? 'svd') {
-    case 'svd':
-      return svdRotation(pointsForProjection);
+  if (!rotation || rotation.method === 'svd') return svdRotation(pointsForProjection);
+  switch (rotation.method) {
     case 'mean':
-      return rotateByMean(pointsForProjection, enadata, meanParams(rotation));
+      return rotateByMean(pointsForProjection, enadata, rotation.params);
     case 'generalized':
-      return rotateByGeneralized(pointsForProjection, enadata, generalizedParams(rotation));
+      return rotateByGeneralized(pointsForProjection, enadata, rotation.params);
     case 'regression':
-      return rotateByRegression(pointsForProjection, enadata, regressionParams(rotation));
+      return rotateByRegression(pointsForProjection, enadata, rotation.params);
     case 'regression2':
-      return rotateByRegression2(pointsForProjection, enadata, regressionParams(rotation));
+      return rotateByRegression2(pointsForProjection, enadata, rotation.params);
     case 'hena':
-      return rotateByHena(pointsForProjection, enadata, henaParams(rotation));
+      return rotateByHena(pointsForProjection, enadata, rotation.params);
     case 'spherical':
-      return rotateBySpherical(pointsForProjection, enadata, sphericalParams(rotation));
+      return rotateBySpherical(pointsForProjection, enadata, rotation.params ?? {});
   }
 }
 

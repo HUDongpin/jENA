@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { directedNodePositions, directedNodePositionsWithGroundResponseAdded, ena } from "../src/index.js";
+import { ena } from "../src/index.js";
+import { directedNodePositions, directedNodePositionsWithGroundResponseAdded } from "../src/rotation/index.js";
 import type { Row } from "../src/index.js";
 
 const rows: Row[] = [

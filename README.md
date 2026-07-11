@@ -48,15 +48,22 @@ console.log(set.variance);        // variance explained per rotated dimension
 
 Note on `variance`: shares are normalized across **all** rotated dimensions (rENA semantics), so `SVD1 + SVD2` generally sums to less than 1. Dimension signs are arbitrary (SVD sign indeterminacy) — compare axes up to sign. See [NUMERICS.md](./NUMERICS.md).
 
-## Entrypoints
+## Entrypoints (API tiers)
+
+The root export is the **stable tier** — the verified pipeline, types, stats, and accumulation kernels only (~two dozen names, semver-guarded). Everything else lives behind subpaths:
 
 ```ts
 import { ena, accumulateData, makeSet, projectIn, enaCorrelations, cohensD } from "jena-js";
-import { rowsToCoOccurrences, refWindowMatrix } from "jena-js/core";
-import { createENAPlotModel, toPlotly } from "jena-js/plot";
-import { createENAWorkerClient } from "jena-js/browser";
-// worker bundle: import "jena-js/browser/worker";
+import { rotateByMean, svdRotation, lwsLeastSquaresPositions } from "jena-js/rotation";
+import { createENAPlotModel, toPlotly, renderENAPlot } from "jena-js/plot";
+import { createENAWorkerClient } from "jena-js/browser";       // worker bundle: "jena-js/browser/worker"
+import { multiGaussianElasticNet } from "jena-js/experimental"; // may change in any release
+import { solveLinearSystem } from "jena-js/core";               // internal tier: no semver guarantees
 ```
+
+`RotationOptions` is a discriminated union — each rotation method's parameter shape is enforced at compile time.
+
+**Migrating from ≤0.5.x:** the root previously re-exported the entire codebase. Rotation functions moved to `jena-js/rotation`, plot helpers to `jena-js/plot`, the worker client to `jena-js/browser`, the elastic net and typed-array table helpers to `jena-js/experimental`, and numerical internals (linear solvers, Gram-Schmidt, matrix utilities) are only available from `jena-js/core`. Code that used `ena`/`accumulateData`/`makeSet`/`projectIn`/stats from the root is unaffected.
 
 ## Verified vs experimental surface
 

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { ena, multiGaussianElasticNet, multiGaussianElasticNetCV } from "../src/index.js";
+import { ena } from "../src/index.js";
+import { multiGaussianElasticNet, multiGaussianElasticNetCV } from "../src/experimental.js";
 import type { Matrix, Row } from "../src/index.js";
 
 // The multivariate elastic net is verified against glmnet (family =

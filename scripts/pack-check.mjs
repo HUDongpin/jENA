@@ -32,6 +32,8 @@ const required = [
   "dist/index.js",
   "dist/index.d.ts",
   "dist/core/index.js",
+  "dist/rotation/index.js",
+  "dist/experimental.js",
   "dist/plot/index.js",
   "dist/browser/index.js",
   "dist/browser/worker.js",

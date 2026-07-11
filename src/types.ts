@@ -39,10 +39,18 @@ export interface SphericalRotationParams {
   secondaryAnchor?: string | number[];
 }
 
-export interface RotationOptions {
-  method: RotationMethod;
-  params?: MeanRotationParams | GeneralizedRotationParams | RegressionRotationParams | HenaRotationParams | SphericalRotationParams;
-}
+/**
+ * Discriminated by `method`, so each rotation's parameter shape is enforced
+ * at compile time (advisory F-012).
+ */
+export type RotationOptions =
+  | { method: 'svd' }
+  | { method: 'mean'; params: MeanRotationParams }
+  | { method: 'generalized'; params: GeneralizedRotationParams }
+  | { method: 'regression'; params: RegressionRotationParams }
+  | { method: 'regression2'; params: RegressionRotationParams }
+  | { method: 'hena'; params: HenaRotationParams }
+  | { method: 'spherical'; params?: SphericalRotationParams };
 
 export interface AccumulateOptions {
   rows: Row[];
