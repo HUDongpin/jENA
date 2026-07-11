@@ -85,12 +85,12 @@ Everything in the **verified** tier is tested against golden outputs generated f
 | Rotation: `generalized` (single covariate) | ✅ Verified | vs `ena.rotate.by.generalized` incl. `select2Groups`; variance compared junk-aware (see NUMERICS.md) |
 | Rotation: `hena` | ✅ Verified | vs `ena.rotation.h` — x/y, factor-expanded controls, interaction, centering on/off (6 golden configs), incl. rENA's run-length dummy coding |
 | Elastic-net solver (`multiGaussianElasticNet`) | ✅ Verified | vs glmnet `mgaussian` at fixed lambdas (1e-6): group lasso, standardization, penalty factors, α-mixing |
-| Streaming/chunked accumulation | ⚠️ Equivalence-tested | Matches batch on all golden configs; no independent rENA goldens |
+| Streaming/chunked accumulation | ✅ Verified | Single engine since 0.6.0 (batch delegates to it): all rENA golden parity suites run through it, plus chunk-size equivalence and a 120-case randomized property suite with an independent window oracle |
 | Rotation: `generalized` with multiple covariates | ⚠️ Solver-verified | The elastic net matches glmnet at equal lambda, but rENA selects lambda via `cv.glmnet` with **randomized folds** — not reproducible even by rENA itself. jena's CV is deterministic (round-robin folds over a glmnet-style path), so a given rENA run can select a different lambda |
 | Rotation: `spherical` | 🔷 jena extension | **No rENA counterpart exists** — anchors axes at chosen adjacency directions; spec-tested (orthonormality, anchor semantics) |
 | Directed node positions | 🧪 Experimental | Throws on this pipeline's undirected models; only usable with external n×n directed adjacency data |
-| Plot adapters, SVG renderer | 🧪 Experimental | Untested convenience helpers |
-| Worker client + protocol | ⚠️ Protocol-tested | Versioned protocol v1: chunked progress, cooperative cancel (chunk granularity), crash/timeout/abort rejection — covered by 12 protocol tests on an in-memory channel; not yet exercised in a real browser |
+| Plot adapters, SVG renderer | ⚠️ Smoke-tested | SVG renderer covered by a real-Chromium DOM smoke test; plotly adapter untested |
+| Worker client + protocol | ✅ Protocol + browser tested | Versioned protocol v1: chunked progress, cooperative cancel, crash/timeout/abort rejection — 12 protocol tests on an in-memory channel plus real-Chromium Worker round-trip tests (result parity, progress, mid-flight cancel) |
 
 If a rotation or statistic will end up in a publication, stay on the ✅ tier or independently validate your configuration against rENA first.
 

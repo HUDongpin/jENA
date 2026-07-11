@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.0 - 2026-07-11
+
+Closes the remaining advisory architecture/performance items (F-007, F-012, F-013, F-014).
+
+### Breaking (API tiering, F-012)
+
+- The root entry now exports only the **stable tier** (~24 runtime names): the verified pipeline (`ena`, `accumulateData` + chunked/streaming, `makeSet`, `projectIn`), all types, the six stats functions, and the rENA-verified accumulation kernels. Migrations: rotation functions → `jena-js/rotation`; plot helpers → `jena-js/plot`; worker client → `jena-js/browser`; elastic net + typed-array helpers → `jena-js/experimental`; numerical internals → `jena-js/core` (internal tier, no semver guarantees).
+- `RotationOptions` is a discriminated union — each rotation method's params shape is compile-checked.
+- `ENAPlotRenderer.element` and the worker message event types are now structural (`SVGNodeLike`, `ENAWorkerMessageEvent<T>`) rather than DOM-lib types.
+
+### Changed
+
+- **One accumulation engine** (F-007): `accumulateData` is a thin wrapper over the streaming core; the duplicated batch machinery is deleted. Verified by full-object chunk-size equivalence on all golden configs plus a 120-case randomized property suite (all models × windows × weights, with masks) against an independent `refWindowMatrix` oracle.
+- **Performance** (F-013): cyclic-by-row Jacobi (190×190 eigensolve ~2991 ms → ~389 ms), radix-argsort ranks and typed-array difference vectors (2000-unit correlations ~3856 ms → ~313 ms), flat mask vectors, Map-based plot edge lookup. `npm run bench` enforces the advisory budgets in CI; baselines and scale guidance in `bench/BASELINES.md`.
+- **DOM-free core** (F-014): the package compiles with `lib: ["ES2022"]` — no DOM lib anywhere; browser-facing files use minimal structural types. New real-browser harness (`npm run test:browser`, Playwright Chromium, CI job): genuine Worker round-trip tests and an SVG renderer DOM smoke test.
+
 ## 0.5.0 - 2026-07-11
 
 ### Verified

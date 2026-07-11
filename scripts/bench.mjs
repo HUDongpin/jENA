@@ -2,7 +2,8 @@
 // built package: npm run bench (builds first). Exits non-zero if any budget
 // is exceeded, so CI catches large regressions; recorded baselines live in
 // bench/BASELINES.md.
-import { ena, enaCorrelations, symmetricJacobiEigen } from "../dist/index.js";
+import { ena, enaCorrelations } from "../dist/index.js";
+import { symmetricJacobiEigen } from "../dist/core/index.js";
 
 function mulberry32(seed) {
   let a = seed >>> 0;
