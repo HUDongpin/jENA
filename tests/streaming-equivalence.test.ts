@@ -65,11 +65,10 @@ if (!existsSync(fixturePath)) {
           const batch = accumulateData(options);
           for (const chunkSize of [1, 5, 1000]) {
             const chunked = accumulateDataChunked({ ...options, chunkSize });
-            expect(chunked.unitLabels).toEqual(batch.unitLabels);
-            expect(chunked.connectionMatrix).toEqual(batch.connectionMatrix);
-            expect(chunked.rowConnectionCounts).toEqual(batch.rowConnectionCounts);
-            expect(chunked.metaData).toEqual(batch.metaData);
-            expect(chunked.trajectories ?? null).toEqual(batch.trajectories ?? null);
+            // Full-object equality: the chunked result must be byte-for-byte
+            // the batch result, including rawRows, connectionCounts,
+            // functionParams, and adjacency metadata.
+            expect(chunked).toEqual(batch);
           }
         });
       }

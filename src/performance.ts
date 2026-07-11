@@ -99,6 +99,8 @@ interface StreamingInternals {
   window: WindowType;
   weightBy: WeightBy;
   windowSizeBack: number;
+  /** User-facing windowSizeBack (Conversation windows use Infinity internally but report the given value). */
+  reportedWindowSizeBack: number;
   windowSizeForward: number;
   includeMeta: boolean;
   materialization: StreamingMaterialization;
@@ -590,6 +592,9 @@ function finishInternals(internals: StreamingInternals): ENAData {
   const resultRows = internals.model === 'EndPoint'
     ? makeEndpointResult(internals)
     : makeTrajectoryResult(internals);
+  if (internals.unitFilter && resultRows.countRows.length === 0) {
+    throw new Error('unitsUsed did not match any accumulated units; check the labels against the merged unit column (units joined with ".").');
+  }
   const connectionMatrix = matrixFromRows(resultRows.connectionCounts, internals.codeColumns);
   const unitLabels = resultRows.countRows.map((row) => internals.model === 'EndPoint'
     ? String(row.ENA_UNIT ?? '')
@@ -616,7 +621,7 @@ function finishInternals(internals: StreamingInternals): ENAData {
       model: internals.model,
       weightBy: internals.weightBy,
       window: internals.window,
-      windowSizeBack: internals.windowSizeBack,
+      windowSizeBack: internals.reportedWindowSizeBack,
       windowSizeForward: internals.windowSizeForward,
       includeMeta: internals.includeMeta,
       ...(internals.unitFilter ? { unitsUsed: [...internals.unitFilter] } : {})
@@ -657,6 +662,7 @@ function makeInternals(options: StreamingAccumulateOptions): StreamingInternals 
     window,
     weightBy,
     windowSizeBack: window === 'Conversation' ? Number.POSITIVE_INFINITY : options.windowSizeBack ?? 1,
+    reportedWindowSizeBack: options.windowSizeBack ?? 1,
     windowSizeForward: options.windowSizeForward ?? 0,
     includeMeta: options.includeMeta ?? true,
     materialization: options.materialization ?? 'full',
