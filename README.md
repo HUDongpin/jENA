@@ -73,7 +73,7 @@ Everything in the **verified** tier is tested against golden outputs generated f
 |---|---|---|
 | Accumulation: `EndPoint`, `AccumulatedTrajectory`, `SeparateTrajectory` | ✅ Verified | All 16 golden configs, both fixture datasets |
 | Windows: moving stanza (back/forward/infinite), conversation | ✅ Verified | Line-faithful port of rENA's C++ `ref_window_df` |
-| Weighting: `binary`, `sum`, custom functions | ✅ Verified | Custom functions golden-tested (`sqrt` configs); applied once per windowed co-occurrence cell before unit accumulation — matches rENA's implementation (its docstring says otherwise; reported upstream) |
+| Weighting: `binary`, `sum`, custom functions | ✅ Verified | Custom functions golden-tested (`sqrt` configs); applied once per windowed co-occurrence cell before unit accumulation — matches rENA's implementation (its docstring says otherwise; noted in [rENA#48](https://gitlab.com/epistemic-analytics/qe-packages/rENA/-/issues/48)) |
 | Sphere normalization, centering | ✅ Verified | Includes rENA's zero-row semantics |
 | SVD rotation, means rotation | ✅ Verified | Points at ~1e-9, rotation matrices up to sign |
 | Variance explained | ✅ Verified | Normalized over all dimensions, 1e-9 vs rENA |
