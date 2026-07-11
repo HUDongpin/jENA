@@ -1,0 +1,78 @@
+{
+  "meta": {
+    "generatedAt": "2026-07-11T12:55:46+0800",
+    "rVersion": "R version 4.4.2 (2024-10-31)",
+    "platform": "aarch64-apple-darwin20",
+    "rENAVersion": "0.3.1",
+    "generatorScript": "scripts/generate-stats-goldens.R"
+  },
+  "qnorm": {
+    "p": [0.0001, 0.001, 0.01, 0.025000000000000001, 0.050000000000000003, 0.10000000000000001, 0.5, 0.90000000000000002, 0.97499999999999998, 0.999, 0.99990000000000001],
+    "value": [-3.71901648545568, -3.0902323061678132, -2.3263478740408408, -1.9599639845400538, -1.6448536269514726, -1.2815515655446008, 0, 1.2815515655446008, 1.9599639845400536, 3.0902323061678132, 3.7190164854557084]
+  },
+  "toy": {
+    "correlations": {
+      "dimensions": ["SVD1", "SVD2"],
+      "pearson": [1, 1],
+      "spearman": [1, 1],
+      "pearsonLower": [1, 1],
+      "pearsonUpper": [1, 1],
+      "pairCount": 6
+    },
+    "cohensD": {
+      "groupColumn": "group",
+      "groups": [
+        "G1",
+        "G2"
+      ],
+      "SVD1": 1.3251041934908232,
+      "SVD2": 0.2083528108014103
+    },
+    "welch": {
+      "groupColumn": "group",
+      "groups": [
+        "G1",
+        "G2"
+      ],
+      "dimension": "SVD1",
+      "statistic": 1.3251041934908232,
+      "df": 1.001985915803238
+    }
+  },
+  "research": {
+    "correlations": {
+      "dimensions": ["SVD1", "SVD2"],
+      "pearson": [0.9997777811191233, 0.97306929445386225],
+      "spearman": [0.99794079794079804, 0.97271557271557285],
+      "pearsonLower": [0.99956037328294933, 0.94740882594430731],
+      "pearsonUpper": [0.99988768067529255, 0.98629751441645763],
+      "pairCount": 36
+    },
+    "cohensD": {
+      "groupColumn": "group",
+      "groups": [
+        "Team Blue",
+        "Team Red"
+      ],
+      "SVD1": 0.0794292780839881,
+      "SVD2": 0.67842949410634312
+    },
+    "welch": {
+      "groupColumn": "group",
+      "groups": [
+        "Team Blue",
+        "Team Red"
+      ],
+      "dimension": "SVD1",
+      "statistic": 0.11498915885186294,
+      "df": 4.3461851061388037
+    },
+    "anova": {
+      "groupColumn": "role",
+      "dimension": "SVD1",
+      "statistic": 2.5654423501845862,
+      "dfBetween": 5,
+      "dfWithin": 3
+    }
+  }
+}

@@ -12,7 +12,8 @@ export {
   dimensionSummary,
   enaCorrelations,
   enaStats,
-  groupSummary
+  groupSummary,
+  inverseNormal
 } from "./stats.js";
 export type {
   DimensionCorrelation,

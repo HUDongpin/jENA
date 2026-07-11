@@ -79,7 +79,12 @@ function ranks(input: number[]): number[] {
   return out;
 }
 
-function inverseNormal(p: number): number {
+/**
+ * Acklam's rational approximation to the standard normal quantile function
+ * (relative error < 1.15e-9), used for correlation confidence intervals.
+ * Golden-tested against R's qnorm.
+ */
+export function inverseNormal(p: number): number {
   if (p <= 0 || p >= 1) return Number.NaN;
   const a = [-39.6968302866538, 220.946098424521, -275.928510446969, 138.357751867269, -30.6647980661472, 2.50662827745924];
   const b = [-54.4760987982241, 161.585836858041, -155.698979859887, 66.8013118877197, -13.2806815528857];
