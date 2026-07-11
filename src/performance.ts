@@ -290,6 +290,17 @@ function addToAccumulator(accumulator: CountAccumulator, values: number[]): void
   }
 }
 
+// Registers the unit/step accumulator when its first raw row ARRIVES, so
+// aggregation order matches batch accumulation (first appearance in row
+// order, like rENA). Forward windows delay consumption of a conversation's
+// trailing rows until flush, which would otherwise reorder units.
+function registerCountAccumulator(internals: StreamingInternals, row: Row, sequence: number): void {
+  const unit = String(row.ENA_UNIT ?? '');
+  if (internals.unitFilter && !internals.unitFilter.has(unit)) return;
+  if (internals.model === 'EndPoint') ensureEndpointCount(internals, row, sequence);
+  else ensureStepCount(internals, row, sequence);
+}
+
 function consumeRowConnection(internals: StreamingInternals, index: number, row: Row): void {
   if (internals.materialization === 'full') internals.rowConnectionRows.push({ index, row });
   const unit = String(row.ENA_UNIT ?? '');
@@ -667,6 +678,7 @@ function ingestRow(internals: StreamingInternals, row: Row, globalIndex: number)
   const rowWithUnit = makeUnitRow(row, internals.units);
   if (internals.materialization === 'full') internals.rawRows.push(rowWithUnit);
   ensureMetadata(internals, rowWithUnit, globalIndex);
+  registerCountAccumulator(internals, rowWithUnit, globalIndex);
   if (internals.window === 'Conversation') pushConversationRow(internals, rowWithUnit, internals.rowConnectionSequence);
   else pushMovingRow(internals, rowWithUnit, globalIndex);
   internals.rowConnectionSequence += 1;

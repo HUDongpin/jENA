@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accumulateData, ena } from "../src/index.js";
+import { accumulateData, accumulateDataChunked, ena, projectIn } from "../src/index.js";
 import type { Row } from "../src/index.js";
 
 const rows: Row[] = [
@@ -48,5 +48,40 @@ describe("accumulateData", () => {
     // Displayed points remain truncated to the requested dimensions.
     expect(set.points[0]).toHaveProperty("SVD2");
     expect(set.points[0]).not.toHaveProperty("SVD3");
+  });
+
+  it("projectIn with a set's own rotation reproduces its points and variance", () => {
+    const options = {
+      rows,
+      units: ["unit"],
+      conversation: ["conv"],
+      codes: ["A", "B", "C"],
+      windowSizeBack: 2
+    };
+    const set = ena(options);
+    const projected = projectIn(accumulateData(options), set);
+    projected.points.forEach((row, index) => {
+      expect(Number(row.SVD1)).toBeCloseTo(Number(set.points[index]?.SVD1), 12);
+      expect(Number(row.SVD2)).toBeCloseTo(Number(set.points[index]?.SVD2), 12);
+    });
+    expect(projected.variance).toEqual(set.variance);
+    expect(projected.rotation.nodes).toEqual(set.rotation.nodes);
+  });
+
+  it("chunked accumulation matches batch accumulation", () => {
+    const options = {
+      rows,
+      units: ["unit"],
+      conversation: ["conv"],
+      codes: ["A", "B", "C"],
+      windowSizeBack: 2
+    };
+    const batch = accumulateData(options);
+    for (const chunkSize of [1, 2, 100]) {
+      const chunked = accumulateDataChunked({ ...options, chunkSize });
+      expect(chunked.connectionCounts).toEqual(batch.connectionCounts);
+      expect(chunked.rowConnectionCounts).toEqual(batch.rowConnectionCounts);
+      expect(chunked.unitLabels).toEqual(batch.unitLabels);
+    }
   });
 });
