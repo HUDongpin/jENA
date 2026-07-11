@@ -89,7 +89,7 @@ Everything in the **verified** tier is tested against golden outputs generated f
 | Rotation: `generalized` with multiple covariates | ⚠️ Solver-verified | The elastic net matches glmnet at equal lambda, but rENA selects lambda via `cv.glmnet` with **randomized folds** — not reproducible even by rENA itself. jena's CV is deterministic (round-robin folds over a glmnet-style path), so a given rENA run can select a different lambda |
 | Rotation: `spherical` | 🔷 jena extension | **No rENA counterpart exists** — anchors axes at chosen adjacency directions; spec-tested (orthonormality, anchor semantics) |
 | Directed node positions | 🧪 Experimental | Throws on this pipeline's undirected models; only usable with external n×n directed adjacency data |
-| Plot adapters, SVG renderer | ⚠️ Smoke-tested | SVG renderer covered by a real-Chromium DOM smoke test; plotly adapter untested |
+| Plot model, plotly adapter, SVG renderer | ✅ Tested (jena-specific) | 16 contract tests pin every builder and the plotly trace/layout mapping; SVG renderer smoke-tested in real Chromium. No rENA golden — rENA's R-plotly stack is structurally incomparable |
 | Worker client + protocol | ✅ Protocol + browser tested | Versioned protocol v1: chunked progress, cooperative cancel, crash/timeout/abort rejection — 12 protocol tests on an in-memory channel plus real-Chromium Worker round-trip tests (result parity, progress, mid-flight cancel) |
 
 If a rotation or statistic will end up in a publication, stay on the ✅ tier or independently validate your configuration against rENA first.
