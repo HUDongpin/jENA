@@ -35,7 +35,7 @@ import {
   symmetricJacobiEigen
 } from '../core/linear.js';
 import { svdRotation, type SvdRotationResult } from './svd.js';
-import { elasticNetCV } from './elasticNet.js';
+import { multiGaussianElasticNetCV } from './elasticNet.js';
 
 interface FormulaSpec {
   lhs: string;
@@ -266,11 +266,21 @@ function gmr(points: Matrix, rows: Row[], vars: string[]): GmrResult {
   let fittedMainEffect = fittedUnadjusted;
 
   if (vars.length > 1) {
+    // Mirrors rENA's get_x1_main_effect: a multivariate elastic net with the
+    // target predictor unpenalized (penalty factor 0), the fitted main
+    // effect being the target column times its coefficients — WITHOUT the
+    // intercept. rENA selects lambda via cv.glmnet with randomized folds;
+    // jena's CV is deterministic (see NUMERICS.md), so lambda selection can
+    // differ from any particular rENA run while the solver itself matches
+    // glmnet at equal lambda.
     const design = buildMetadataDesign(rows, vars);
-    const x1Columns = design.labels.map((label, index) => index === 0 || label === (vars[0] ?? '') ? 0 : 1);
-    const coefficients = elasticNetCV(design.matrix, points, { alpha: 1, penaltyFactor: x1Columns }).coefficients;
-    const targetOnly = design.matrix.map((row) => row.map((value, index) => (index <= 1 ? value : 0)));
-    fittedMainEffect = multiplyMatrices(targetOnly, coefficients);
+    const predictors = design.matrix.map((row) => row.slice(1));
+    const predictorLabels = design.labels.slice(1);
+    const penaltyFactor = predictorLabels.map((label) => (label === (vars[0] ?? '') ? 0 : 1));
+    const fit = multiGaussianElasticNetCV(predictors, points, { alpha: 1, penaltyFactor });
+    const x1Index = predictorLabels.indexOf(vars[0] ?? '');
+    const x1Coefficients = fit.coefficients[x1Index] ?? [];
+    fittedMainEffect = predictors.map((row) => x1Coefficients.map((coefficient) => (row[x1Index] ?? 0) * coefficient));
   }
 
   if (numericTarget) {
@@ -448,58 +458,100 @@ export function rotateByRegression2(pointsForProjection: Matrix, enadata: ENADat
   return assembleRotation(pointsForProjection, columns, names);
 }
 
-function henaPredictorColumns(rows: Row[], params: HenaRotationParams): { matrix: Matrix; names: string[]; both: string[] } {
-  const centering = params.centering ?? true;
-  const both = [params.xVar, ...(params.yVar ? [params.yVar] : [])];
-  const controlVars = params.controlVars ?? [];
-  const vars = params.formula
-    ? parseFormula(`V ~ ${params.formula}`).rhsTerms
-    : [...both, ...controlVars, ...(params.includeXY && params.yVar ? [`${params.xVar}:${params.yVar}`] : [])];
-  const encoded = new Map<string, number[]>();
-  for (const name of [...new Set(vars.flatMap((term) => term.split(':').map((piece) => piece.trim())))]) {
-    if (!name) continue;
-    const values = encodeVector(metadataVector(rows, name));
-    const mean = both.includes(name) && centering ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
-    encoded.set(name, values.map((value) => value - mean));
-  }
+// data.table::rleidv semantics: run-length group ids in row order, so a
+// value that re-appears after a different value starts a NEW group. This is
+// how rENA's ena.rotation.h dummy-codes categorical variables — faithful to
+// upstream even though it only behaves like a conventional dummy code when
+// the rows are sorted by that variable (see NUMERICS.md).
+function runLengthEncode(values: Scalar[]): number[] {
+  let id = -1;
+  let previous: string | undefined;
+  return values.map((value) => {
+    const key = String(value);
+    if (key !== previous) {
+      id += 1;
+      previous = key;
+    }
+    return id;
+  });
+}
 
-  const columns: number[][] = [Array.from({ length: rows.length }, () => 1)];
-  const names = ['(Intercept)'];
-  for (const term of vars) {
-    const pieces = term.split(':').map((piece) => piece.trim()).filter(Boolean);
-    const columnValues = pieces.reduce(
-      (current, piece) => current.map((value, index) => value * (encoded.get(piece)?.[index] ?? 0)),
-      Array.from({ length: rows.length }, () => 1)
-    );
-    columns.push(columnValues);
-    names.push(term);
+function centerVectorValues(values: number[]): number[] {
+  const mean = values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+  return values.map((value) => value - mean);
+}
+
+function isNumericColumn(values: Scalar[]): boolean {
+  return values.every((value) => typeof value === 'number' && Number.isFinite(value));
+}
+
+// lm-style treatment contrasts for a character control variable: one 0/1
+// column per sorted level after the first (the reference level).
+function factorContrastColumns(values: Scalar[], name: string): { columns: number[][]; names: string[] } {
+  const levels = [...new Set(values.map((value) => String(value)))].sort();
+  const columns: number[][] = [];
+  const names: string[] = [];
+  for (const level of levels.slice(1)) {
+    columns.push(values.map((value) => (String(value) === level ? 1 : 0)));
+    names.push(`${name}${level}`);
   }
-  return { matrix: columnsToMatrix(columns, rows.length), names, both };
+  return { columns, names };
 }
 
 export function rotateByHena(pointsForProjection: Matrix, enadata: ENAData, params: HenaRotationParams): SvdRotationResult {
+  // ena.rotation.h re-centers the (already centered-for-projection) values
+  // by their plain column means before regressing and deflating.
   const data = centerData(pointsForProjection);
-  const design = henaPredictorColumns(enadata.metaData, params);
-  const coefficients = designSolve(design.matrix, data);
-  const leadingColumns: number[][] = [];
-  const leadingNames: string[] = [];
-  for (const variableName of design.both) {
-    const coefficientIndex = design.names.indexOf(variableName);
-    if (coefficientIndex < 0) continue;
-    let vector = coefficients[coefficientIndex] ?? [];
-    for (const previous of leadingColumns) {
-      vector = subtractVectors(vector, previous.map((value) => value * dot(vector, previous)));
-    }
-    vector = normalizeVector(vector);
-    if (l2Norm(vector) > 0) {
-      leadingColumns.push(vector);
-      leadingNames.push(`${leadingColumns.length === 1 ? 'x' : 'y'}_${variableName}`);
+  const rows = enadata.metaData;
+  const centering = params.centering ?? true;
+
+  const encodeVariable = (name: string): { values: number[]; label: string } => {
+    const raw = metadataVector(rows, name);
+    if (isNumericColumn(raw)) return { values: raw.map((value) => Number(value)), label: name };
+    // rENA renames dummy-coded variables with an _f suffix, which also shows
+    // up in the rotation column names (x_group_f).
+    return { values: runLengthEncode(raw), label: `${name}_f` };
+  };
+
+  const x = encodeVariable(params.xVar);
+  const y = params.yVar ? encodeVariable(params.yVar) : undefined;
+  if (centering) {
+    x.values = centerVectorValues(x.values);
+    if (y) y.values = centerVectorValues(y.values);
+  }
+
+  // Design: intercept, x, y, controls (character controls expand to lm-style
+  // factor contrasts), then the optional centered x*y interaction.
+  const columns: number[][] = [Array.from({ length: rows.length }, () => 1), x.values];
+  if (y) columns.push(y.values);
+  for (const control of params.controlVars ?? []) {
+    const raw = metadataVector(rows, control);
+    if (isNumericColumn(raw)) {
+      columns.push(raw.map((value) => Number(value)));
+    } else {
+      columns.push(...factorContrastColumns(raw, control).columns);
     }
   }
-  if (leadingColumns.length === 0) throw new Error('HENA rotation could not derive a non-zero rotation vector.');
-  const deflated = deflateMatrix(data, leadingColumns);
-  const result = rotateWithLeadingColumns(deflated, leadingColumns, leadingNames);
-  const svd = svdRotation(deflated);
+  if (params.includeXY && y) {
+    columns.push(x.values.map((value, index) => value * (y.values[index] ?? 0)));
+  }
+
+  const coefficients = designSolve(columnsToMatrix(columns, rows.length), data);
+  const v1 = normalizeVector(coefficients[1] ?? []);
+  if (l2Norm(v1) === 0) throw new Error('HENA rotation could not derive a non-zero rotation vector.');
+  const leadingColumns = [v1];
+  const leadingNames = [`x_${x.label}`];
+  if (y) {
+    const rawY = coefficients[2] ?? [];
+    const orthogonalized = normalizeVector(subtractVectors(rawY, v1.map((value) => value * dot(rawY, v1))));
+    if (l2Norm(orthogonalized) > 0) {
+      leadingColumns.push(orthogonalized);
+      leadingNames.push(`y_${y.label}`);
+    }
+  }
+
+  const result = assembleRotation(data, leadingColumns, leadingNames);
+  const svd = svdRotation(deflateMatrix(data, leadingColumns));
   return { ...result, eigenvalues: svd.eigenvalues };
 }
 
@@ -516,6 +568,13 @@ function anchorVector(anchor: string | number[] | undefined, enadata: ENAData, w
   return Array.from({ length: width }, (_unused, col) => (col === 0 ? 1 : 0));
 }
 
+/**
+ * jena-specific extension with NO rENA counterpart: anchors the first axis
+ * at a chosen adjacency direction (a co-occurrence column name or a custom
+ * vector), orthogonalizes an optional secondary anchor against it, and
+ * completes the basis with the SVD of the orthogonal complement. Useful for
+ * fixing an interpretable axis; spec-tested in tests/spherical.test.ts.
+ */
 export function rotateBySpherical(pointsForProjection: Matrix, enadata: ENAData, params: { anchor?: string | number[]; secondaryAnchor?: string | number[] } = {}): SvdRotationResult {
   const width = pointsForProjection[0]?.length ?? 0;
   const first = anchorVector(params.anchor, enadata, width);

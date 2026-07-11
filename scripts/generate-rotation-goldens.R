@@ -133,6 +133,11 @@ payload <- list(
         toy_accum, rENA::ena.rotate.by.generalized,
         list(x_var = toy_accum$meta.data[, "group", with = FALSE]),
         list(method = "generalized", params = list(xVar = "group"))
+      ),
+      henaX = make_rotation_config(
+        toy_accum, rENA::ena.rotation.h,
+        list(x_var = "group"),
+        list(method = "hena", params = list(xVar = "group"))
       )
     )
   ),
@@ -173,6 +178,31 @@ payload <- list(
           select_2_groups = list("Facilitator", "Evidence builder")
         ),
         list(method = "generalized", params = list(xVar = "role", select2Groups = list("Facilitator", "Evidence builder")))
+      ),
+      henaX = make_rotation_config(
+        research_accum, rENA::ena.rotation.h,
+        list(x_var = "group"),
+        list(method = "hena", params = list(xVar = "group"))
+      ),
+      henaXY = make_rotation_config(
+        research_accum, rENA::ena.rotation.h,
+        list(x_var = "group", y_var = "role"),
+        list(method = "hena", params = list(xVar = "group", yVar = "role"))
+      ),
+      henaControls = make_rotation_config(
+        research_accum, rENA::ena.rotation.h,
+        list(x_var = "group", control_vars = c("role")),
+        list(method = "hena", params = list(xVar = "group", controlVars = list("role")))
+      ),
+      henaInteraction = make_rotation_config(
+        research_accum, rENA::ena.rotation.h,
+        list(x_var = "group", y_var = "role", include_xy = TRUE),
+        list(method = "hena", params = list(xVar = "group", yVar = "role", includeXY = TRUE))
+      ),
+      henaNoCentering = make_rotation_config(
+        research_accum, rENA::ena.rotation.h,
+        list(x_var = "group", y_var = "role", include_xy = TRUE, centering = FALSE),
+        list(method = "hena", params = list(xVar = "group", yVar = "role", includeXY = TRUE, centering = FALSE))
       )
     )
   ),

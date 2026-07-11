@@ -76,9 +76,11 @@ Everything in the **verified** tier is tested against golden outputs generated f
 | Stats: Welch t, one-way ANOVA (`enaStats`) | ✅ Verified | vs R `t.test` / `aov`; **no p-values** — statistic + df only |
 | Rotations: `regression`, `regression2` | ✅ Verified | vs `ena.rotate.by.hena.regression`/`_2` — x-only, x+y, and multi-term formulas (12 golden configs) |
 | Rotation: `generalized` (single covariate) | ✅ Verified | vs `ena.rotate.by.generalized` incl. `select2Groups`; variance compared junk-aware (see NUMERICS.md) |
+| Rotation: `hena` | ✅ Verified | vs `ena.rotation.h` — x/y, factor-expanded controls, interaction, centering on/off (6 golden configs), incl. rENA's run-length dummy coding |
+| Elastic-net solver (`multiGaussianElasticNet`) | ✅ Verified | vs glmnet `mgaussian` at fixed lambdas (1e-6): group lasso, standardization, penalty factors, α-mixing |
 | Streaming/chunked accumulation | ⚠️ Equivalence-tested | Matches batch on all golden configs; no independent rENA goldens |
-| Rotation: `generalized` with multiple covariates | 🧪 Experimental | rENA runs this through `cv.glmnet` with randomized folds — not reproducible even by rENA itself; jena uses a deterministic elastic net |
-| Rotations: `hena`, `spherical` | 🧪 Experimental | **Not verified against rENA** |
+| Rotation: `generalized` with multiple covariates | ⚠️ Solver-verified | The elastic net matches glmnet at equal lambda, but rENA selects lambda via `cv.glmnet` with **randomized folds** — not reproducible even by rENA itself. jena's CV is deterministic (round-robin folds over a glmnet-style path), so a given rENA run can select a different lambda |
+| Rotation: `spherical` | 🔷 jena extension | **No rENA counterpart exists** — anchors axes at chosen adjacency directions; spec-tested (orthonormality, anchor semantics) |
 | Directed node positions | 🧪 Experimental | Throws on this pipeline's undirected models; only usable with external n×n directed adjacency data |
 | Plot adapters, SVG renderer | 🧪 Experimental | Untested convenience helpers |
 | Worker client + protocol | ⚠️ Protocol-tested | Versioned protocol v1: chunked progress, cooperative cancel (chunk granularity), crash/timeout/abort rejection — covered by 12 protocol tests on an in-memory channel; not yet exercised in a real browser |

@@ -27,7 +27,8 @@ The zip is not committed to this repository (19 MB); unpack it to `reference/rEN
 | `src/accumulate.ts` | `R/ena.accumulate.data.R` and accumulation helpers |
 | `src/model.ts` (`makeSet`, centering, variance) | `R/ena.make.set.R` |
 | `src/rotation/svd.ts` | `R/ena.svd.R` (prcomp-based SVD rotation) |
-| `src/rotation/custom.ts` (`rotateByMean`, `rotateByRegression`/`2`, `rotateByGeneralized` verified; hena/spherical experimental) | `R/ena.rotate.by.mean.R`, `ena.rotate.by.regression*.R` (`ena.rotate.by.hena.regression`/`_2`), `ena.rotate.by.generalized.R`, `R/gmr.R`, `ena.rotation.h.R` |
+| `src/rotation/custom.ts` (`rotateByMean`, `rotateByRegression`/`2`, `rotateByGeneralized`, `rotateByHena` verified; `rotateBySpherical` is a jena extension with no rENA counterpart) | `R/ena.rotate.by.mean.R`, `ena.rotate.by.regression*.R` (`ena.rotate.by.hena.regression`/`_2`), `ena.rotate.by.generalized.R`, `R/gmr.R`, `ena.rotation.h.R` |
+| `src/rotation/elasticNet.ts` (glmnet-compatible multivariate elastic net) | mirrors `glmnet::glmnet(family = "mgaussian")` semantics used by `R/gmr.R` (`get_x1_main_effect`) |
 | `src/rotation/nodePositions.ts` (undirected solver) | `src/ena.cpp` (`lws_lsq_positions`), `R/lws.positions.sq.R` |
 | `src/stats.ts` (`cohensD`, `enaCorrelations`) | `R/cohens.d.R` (`fun_cohens.d`), `R/ena.correlations.R` |
 | `src/performance.ts` (streaming re-implementation of the above) | same window/accumulation semantics as `src/ena.cpp` |

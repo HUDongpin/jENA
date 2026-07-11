@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.0 - 2026-07-11
+
+### Verified
+
+- **`hena` rotation is golden-verified against rENA's `ena.rotation.h`** (6 configurations: x-only, x+y, factor-expanded controls, x·y interaction, centering on/off). The port now reproduces rENA's `rleidv` run-length dummy coding (with `_f` column-name suffixes), lm-style factor contrasts for character controls, y-axis orthogonalization, and the prcomp-style basis completion.
+- **The multivariate elastic net is verified against glmnet** (`family = "mgaussian"`) at fixed lambdas to 1e-6 — group lasso across responses, internal standardization, glmnet penalty-factor rescaling, intercept handling, and α-mixing (new fixture + `npm run goldens:elasticnet`). rENA's lambda *selection* (`cv.glmnet`) randomizes folds and is not reproducible even across rENA runs; jena's CV is deterministic (round-robin folds over a glmnet-style path) — see NUMERICS.md.
+- **`spherical` is documented as a jena-specific extension** — rENA 0.3.1 has no spherical rotation. Its anchor semantics, orthonormality, and variance conservation are locked by spec tests.
+
+### Breaking
+
+- `elasticNet`/`elasticNetCV` (per-response lasso with a fixed lambda grid) are replaced by `multiGaussianElasticNet`/`multiGaussianElasticNetCV` (glmnet-compatible). The multi-covariate `generalized` rotation now uses the verified solver, and its fitted main effect no longer includes the intercept (matching rENA's `get_x1_main_effect`).
+- `HenaRotationParams.formula` was removed: the previous parser silently mis-parsed R formula syntax; the advisory calls for loud rejection. Use `xVar`/`yVar`/`controlVars`/`includeXY`.
+
 ## 0.4.0 - 2026-07-11
 
 ### Worker protocol v1 (advisory F-008) — breaking for direct protocol users

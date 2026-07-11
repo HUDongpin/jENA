@@ -41,9 +41,28 @@ rENA's `prcomp(tol = 0)` drops exactly-zero components, so rENA may report fewer
 
 **Variance-share caveat (rENA artifact):** rENA completes the rotation basis with `prcomp`, whose numerically-null trailing directions come from LAPACK's arbitrary null-space basis. Those directions can overlap the regression axis and silently absorb a real variance share (~5% on our research fixture), contaminating every reported share in a way that is not reproducible across BLAS implementations. jena instead keeps only directions genuinely spanned by the deflated data and completes the basis orthogonally, so null directions carry exactly zero variance and shares are well-defined. Golden tests therefore compare variance shares renormalized over the directions that carry variance on both sides; for SVD/mean rotations this reduces to the strict per-column check.
 
-## Experimental rotations
+## hena rotation (verified, with upstream quirks)
 
-`generalized` with **multiple covariates**, `hena`, and `spherical` are **not** golden-verified. The multi-covariate generalized path runs through `cv.glmnet` with randomized folds in rENA — its output is not reproducible even by rENA itself, so no golden can exist; jena substitutes a deterministic coordinate-descent lasso with a fixed lambda grid. R model formulas are parsed by a simplified parser (`~`, `+`, `:` only — no `*`, `poly()`, or nested calls). Validate independently before research use.
+`hena` is golden-verified against `ena.rotation.h` (6 configurations: x-only, x+y, factor-expanded controls, x·y interaction, centering on/off). Faithfully ported rENA behaviors worth knowing:
+
+- Categorical x/y variables are dummy-coded with `data.table::rleidv` semantics — **run-length ids in row order**, so a value that re-appears after a different value starts a new group. This only behaves like a conventional dummy code when the rows are sorted by that variable; jena reproduces it exactly. Dummy-coded variables get an `_f` suffix in the rotation column names (`x_group_f`).
+- Character control variables expand into lm-style treatment contrasts (one 0/1 column per sorted level after the first); the x·y interaction is the product of the (optionally centered) coded x and y.
+- The y axis is orthogonalized against the x axis (unlike the regression rotations, which keep both raw).
+- The `formula` override parameter was removed: the previous parser silently mis-parsed R formula syntax, and the advisory calls for loud rejection over silent mis-parsing. Use `xVar`/`yVar`/`controlVars`/`includeXY`.
+
+## Multivariate elastic net (solver verified; CV deterministic by design)
+
+The multi-covariate `generalized` rotation estimates the target's main effect with a multivariate elastic net, mirroring rENA's `get_x1_main_effect` (glmnet `family = "mgaussian"`: a group lasso across the response columns, internal predictor standardization, penalty factors rescaled to sum to the predictor count, unpenalized intercept). jena's `multiGaussianElasticNet` is **verified against glmnet at fixed lambda values to 1e-6** (four cases covering the gmr penalty shape, all-penalized, unstandardized, and α = 0.5 mixing; glmnet's own convergence tolerance, not jena's, sets the bound).
+
+What cannot be verified: rENA selects lambda via `cv.glmnet`, which **randomizes fold assignment** — two rENA runs on the same data can pick different lambdas and produce different rotations. jena's `multiGaussianElasticNetCV` is deterministic instead: round-robin folds (row index mod nfolds) over a glmnet-style log-spaced lambda path. At equal lambda the two implementations agree; the selected lambda may legitimately differ from any particular rENA run. jena's fitted main effect excludes the intercept, matching rENA's `mm[, x1_cols] %*% x1_coefs`. One remaining design difference: rENA builds its design matrix with `model.matrix(~ .^2)` (all pairwise interactions, factor expansion); jena's simplified design uses the listed variables (with explicit `:` products) and numeric encodings.
+
+## spherical rotation (jena extension)
+
+`spherical` has **no rENA counterpart** (verified against the rENA 0.3.1 source). It anchors the first axis at a chosen adjacency direction (a co-occurrence column name or custom vector), orthogonalizes an optional secondary anchor against it, and completes the basis orthogonally. Its spec — anchor semantics, orthonormality, variance conservation — is locked by unit tests rather than rENA goldens.
+
+## Formula parsing
+
+R model formulas in the regression rotations are parsed by a simplified parser (`~`, `+`, `:` only — no `*`, `poly()`, or nested calls). Unsupported syntax is rejected loudly rather than mis-parsed.
 
 ## Golden test tolerances (summary)
 

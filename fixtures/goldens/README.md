@@ -19,7 +19,8 @@ npm run goldens:r      # writes sena-configs.regenerated.json (never clobbers)
 npm run goldens:diff   # compares regenerated vs committed at 1e-9 tolerance
 npm run goldens:compare  # runs the vitest parity suite
 npm run goldens:stats     # regenerates stats.generated.json (correlations, cohen's d, t/F)
-npm run goldens:rotations # regenerates rotations.generated.json (regression/generalized rotations)
+npm run goldens:rotations # regenerates rotations.generated.json (regression/generalized/hena rotations)
+npm run goldens:elasticnet # regenerates elasticnet.generated.json (glmnet mgaussian at fixed lambdas)
 ```
 
 `stats.generated.json` and `rotations.generated.json` are generated against the

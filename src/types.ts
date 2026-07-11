@@ -32,7 +32,6 @@ export interface HenaRotationParams {
   controlVars?: string[];
   centering?: boolean;
   includeXY?: boolean;
-  formula?: string;
 }
 
 export interface SphericalRotationParams {
