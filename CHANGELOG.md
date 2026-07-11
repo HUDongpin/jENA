@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.2 - 2026-07-12
+
+- `package.json` `sideEffects` is now `["./dist/browser/worker.js"]` instead
+  of `false`. The worker entry registers its protocol-v1 message host as a
+  module side effect, so under `sideEffects: false` a bundler consuming a
+  bare `import "jena-js/browser/worker"` tree-shook the registration away —
+  webpack/Next.js emitted an ~8-byte empty worker chunk and the worker hung
+  silently at 0% (first hit by SENA, which had to anchor the import through
+  an exported binding as a workaround). All other entries remain declared
+  pure. `pack-check` now asserts the declaration so it cannot regress.
+  No runtime changes.
+
 ## 0.6.1 - 2026-07-11
 
 - Added `RELEASING.md`: the practiced release checklist (gates, the npm web-2FA timing note, tagging, GitHub release, and the registry-install smoke test), closing the advisory's remaining documentation item (T-16). No runtime changes.

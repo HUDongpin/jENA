@@ -1,6 +1,6 @@
 {
   "name": "jena-js",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Standalone TypeScript/JavaScript library for Epistemic Network Analysis, ported from rENA for browser and Node runtimes.",
   "type": "module",
   "license": "GPL-3.0-only",
@@ -24,7 +24,9 @@
   "engines": {
     "node": ">=18"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/browser/worker.js"
+  ],
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
