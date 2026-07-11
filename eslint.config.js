@@ -26,7 +26,7 @@ export default [
     }
   },
   {
-    files: ["src/plot/render.ts", "src/browser/**/*.ts"],
+    files: ["src/plot/render.ts", "src/browser/**/*.ts", "tests/browser/**/*.ts"],
     rules: {
       "no-restricted-globals": "off"
     }

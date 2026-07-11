@@ -33,8 +33,13 @@ export type ENAWorkerResponse =
   | { v: 1; kind: 'cancelled'; id: string }
   | { v: 1; kind: 'error'; id: string; message: string };
 
+/** Structural message event, so no DOM lib is needed (advisory F-014). */
+export interface ENAWorkerMessageEvent<T> {
+  data: T;
+}
+
 export interface ENAWorkerScope {
-  addEventListener(type: 'message', listener: (event: MessageEvent<ENAWorkerRequest>) => void): void;
+  addEventListener(type: 'message', listener: (event: ENAWorkerMessageEvent<ENAWorkerRequest>) => void): void;
   postMessage(message: ENAWorkerResponse): void;
 }
 
@@ -132,13 +137,14 @@ export function createENAWorkerHost(scope: ENAWorkerScope): void {
     }
   };
 
-  scope.addEventListener('message', (event: MessageEvent<ENAWorkerRequest>) => {
+  scope.addEventListener('message', (event: ENAWorkerMessageEvent<ENAWorkerRequest>) => {
     const message = event.data;
     if (!message || message.v !== ENA_WORKER_PROTOCOL_VERSION || typeof message.id !== 'string') return;
     if (message.kind === 'cancel') {
       // Marks the queued or active run; unknown/settled ids are ignored, so
       // nothing accumulates (the old module-level Set leaked forever).
-      if (active?.id === message.id) active.cancelled = true;
+      const current = active;
+      if (current && current.id === message.id) current.cancelled = true;
       const queued = queue.find((run) => run.id === message.id);
       if (queued) queued.cancelled = true;
       return;

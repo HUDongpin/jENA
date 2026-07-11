@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createENAWorkerHost } from "../src/browser/worker.js";
-import type { ENAWorkerRequest, ENAWorkerResponse, ENAWorkerScope } from "../src/browser/worker.js";
+import type { ENAWorkerMessageEvent, ENAWorkerRequest, ENAWorkerResponse, ENAWorkerScope } from "../src/browser/worker.js";
 import { ENAWorkerCancelledError, createENAWorkerClient } from "../src/browser/client.js";
 import type { ENAWorkerLike, ENAWorkerProgress } from "../src/browser/client.js";
 import { ena } from "../src/index.js";
@@ -11,9 +11,9 @@ import type { Row } from "../src/index.js";
 // postMessage) and delivered as macrotasks (so cooperative cancellation has
 // the same event-loop timing as a real worker).
 function createWorkerPair() {
-  const workerListeners: Array<(event: MessageEvent<ENAWorkerRequest>) => void> = [];
+  const workerListeners: Array<(event: ENAWorkerMessageEvent<ENAWorkerRequest>) => void> = [];
   const clientListeners = {
-    message: [] as Array<(event: MessageEvent<ENAWorkerResponse>) => void>,
+    message: [] as Array<(event: ENAWorkerMessageEvent<ENAWorkerResponse>) => void>,
     error: [] as Array<(event: unknown) => void>,
     messageerror: [] as Array<(event: unknown) => void>
   };
@@ -25,7 +25,7 @@ function createWorkerPair() {
     postMessage(message) {
       const clone = structuredClone(message);
       setTimeout(() => {
-        for (const listener of clientListeners.message) listener({ data: clone } as MessageEvent<ENAWorkerResponse>);
+        for (const listener of clientListeners.message) listener({ data: clone });
       }, 0);
     }
   };
@@ -34,7 +34,7 @@ function createWorkerPair() {
     postMessage(message) {
       const clone = structuredClone(message);
       setTimeout(() => {
-        for (const listener of workerListeners) listener({ data: clone } as MessageEvent<ENAWorkerRequest>);
+        for (const listener of workerListeners) listener({ data: clone });
       }, 0);
     },
     addEventListener(type: "message" | "error" | "messageerror", listener: never) {
@@ -55,7 +55,7 @@ function createWorkerPair() {
       for (const listener of clientListeners.error) listener({ message });
     },
     emitRawMessage(data: unknown) {
-      for (const listener of clientListeners.message) listener({ data } as MessageEvent<ENAWorkerResponse>);
+      for (const listener of clientListeners.message) listener({ data } as ENAWorkerMessageEvent<ENAWorkerResponse>);
     }
   };
 }

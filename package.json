@@ -72,6 +72,7 @@
     "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build && npm run pack:check",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "bench": "npm run build && node scripts/bench.mjs",
@@ -83,12 +84,13 @@
     "goldens:diff": "node scripts/compare-goldens.mjs",
     "goldens:compare": "vitest run tests/r-goldens.test.ts"
   },
-  "dependencies": {},
   "devDependencies": {
     "@types/node": "^22.15.0",
     "@typescript-eslint/eslint-plugin": "^8.32.0",
     "@typescript-eslint/parser": "^8.32.0",
+    "@vitest/browser": "^3.2.6",
     "eslint": "^9.26.0",
+    "playwright": "^1.61.1",
     "tsup": "^8.4.0",
     "typescript": "^5.8.3",
     "vitest": "^3.1.3"

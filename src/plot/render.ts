@@ -1,5 +1,23 @@
 import type { ENAPlotModel, ENAPlotPoint, ENAPlotTrace } from './model.js';
 
+// Minimal structural view of the DOM surface this renderer touches, so the
+// package compiles with lib: ["ES2022"] and no DOM lib (advisory F-014). At
+// runtime these are the real browser objects.
+export interface SVGNodeLike {
+  setAttribute(name: string, value: string): void;
+  append(...nodes: SVGNodeLike[]): void;
+  replaceChildren(...nodes: SVGNodeLike[]): void;
+  remove(): void;
+  textContent: string | null;
+}
+
+export interface ElementLike {
+  append(...nodes: SVGNodeLike[]): void;
+  replaceChildren(...nodes: SVGNodeLike[]): void;
+}
+
+declare const document: { createElementNS(namespace: string, tagName: string): SVGNodeLike };
+
 export interface ENAPlotRendererOptions {
   width?: number;
   height?: number;
@@ -9,18 +27,18 @@ export interface ENAPlotRendererOptions {
 }
 
 export interface ENAPlotRenderer {
-  element: SVGSVGElement;
+  element: SVGNodeLike;
   update(model: ENAPlotModel): void;
   destroy(): void;
 }
 
 const svgNamespace = 'http://www.w3.org/2000/svg';
 
-function svgElement<K extends keyof SVGElementTagNameMap>(tagName: K): SVGElementTagNameMap[K] {
+function svgElement(tagName: string): SVGNodeLike {
   return document.createElementNS(svgNamespace, tagName);
 }
 
-function setAttributes(element: Element, attributes: Record<string, string | number>): void {
+function setAttributes(element: SVGNodeLike, attributes: Record<string, string | number>): void {
   for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, String(value));
 }
 
@@ -37,14 +55,14 @@ function pointToPixels(model: ENAPlotModel, point: ENAPlotPoint, width: number, 
   ];
 }
 
-function appendText(group: SVGGElement, text: string, x: number, y: number, attributes: Record<string, string | number> = {}): void {
+function appendText(group: SVGNodeLike, text: string, x: number, y: number, attributes: Record<string, string | number> = {}): void {
   const node = svgElement('text');
   node.textContent = text;
   setAttributes(node, { x, y, ...attributes });
   group.append(node);
 }
 
-function renderAxes(group: SVGGElement, model: ENAPlotModel, width: number, height: number, margin: number): void {
+function renderAxes(group: SVGNodeLike, model: ENAPlotModel, width: number, height: number, margin: number): void {
   const axis = svgElement('path');
   const x0 = scale(0, model.axes.x.range, [margin, width - margin]);
   const y0 = scale(0, model.axes.y.range, [height - margin, margin]);
@@ -59,7 +77,7 @@ function renderAxes(group: SVGGElement, model: ENAPlotModel, width: number, heig
   appendText(group, model.axes.y.title, margin, 18, { fill: '#475569', 'font-size': 12 });
 }
 
-function renderPointTrace(group: SVGGElement, model: ENAPlotModel, trace: ENAPlotTrace, width: number, height: number, margin: number, showLabels: boolean): void {
+function renderPointTrace(group: SVGNodeLike, model: ENAPlotModel, trace: ENAPlotTrace, width: number, height: number, margin: number, showLabels: boolean): void {
   const points = trace.points ?? [];
   for (let index = 0; index < points.length; index += 1) {
     const point = points[index];
@@ -82,7 +100,7 @@ function renderPointTrace(group: SVGGElement, model: ENAPlotModel, trace: ENAPlo
   }
 }
 
-function renderNetworkTrace(group: SVGGElement, model: ENAPlotModel, trace: ENAPlotTrace, width: number, height: number, margin: number, showLabels: boolean): void {
+function renderNetworkTrace(group: SVGNodeLike, model: ENAPlotModel, trace: ENAPlotTrace, width: number, height: number, margin: number, showLabels: boolean): void {
   const network = trace.network;
   if (!network) return;
   const nodes = new Map(network.nodes.map((node) => [node.id, node]));
@@ -115,7 +133,7 @@ function renderNetworkTrace(group: SVGGElement, model: ENAPlotModel, trace: ENAP
   }
 }
 
-function draw(svg: SVGSVGElement, model: ENAPlotModel, options: Required<ENAPlotRendererOptions>): void {
+function draw(svg: SVGNodeLike, model: ENAPlotModel, options: Required<ENAPlotRendererOptions>): void {
   const width = options.width;
   const height = options.height;
   const margin = 44;
@@ -137,7 +155,7 @@ function draw(svg: SVGSVGElement, model: ENAPlotModel, options: Required<ENAPlot
   appendText(root, model.title, margin, height - 12, { fill: '#0f172a', 'font-size': 13, 'font-weight': 700 });
 }
 
-export function renderENAPlot(container: Element, model: ENAPlotModel, rendererOptions: ENAPlotRendererOptions = {}): ENAPlotRenderer {
+export function renderENAPlot(container: ElementLike, model: ENAPlotModel, rendererOptions: ENAPlotRendererOptions = {}): ENAPlotRenderer {
   const options: Required<ENAPlotRendererOptions> = {
     width: rendererOptions.width ?? 720,
     height: rendererOptions.height ?? 520,

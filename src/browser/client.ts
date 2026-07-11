@@ -1,7 +1,7 @@
 import type { ENASet } from '../types.js';
-import type { ENAWorkerOptions, ENAWorkerRequest, ENAWorkerResponse, ENAWorkerStage } from './worker.js';
+import type { ENAWorkerMessageEvent, ENAWorkerOptions, ENAWorkerRequest, ENAWorkerResponse, ENAWorkerStage } from './worker.js';
 
-export type { ENAWorkerOptions, ENAWorkerRequest, ENAWorkerResponse, ENAWorkerStage } from './worker.js';
+export type { ENAWorkerMessageEvent, ENAWorkerOptions, ENAWorkerRequest, ENAWorkerResponse, ENAWorkerStage } from './worker.js';
 
 export interface ENAWorkerProgress {
   id: string;
@@ -11,9 +11,9 @@ export interface ENAWorkerProgress {
 
 export interface ENAWorkerLike {
   postMessage(message: ENAWorkerRequest): void;
-  addEventListener(type: 'message', listener: (event: MessageEvent<ENAWorkerResponse>) => void): void;
+  addEventListener(type: 'message', listener: (event: ENAWorkerMessageEvent<ENAWorkerResponse>) => void): void;
   addEventListener(type: 'error' | 'messageerror', listener: (event: unknown) => void): void;
-  removeEventListener(type: 'message', listener: (event: MessageEvent<ENAWorkerResponse>) => void): void;
+  removeEventListener(type: 'message', listener: (event: ENAWorkerMessageEvent<ENAWorkerResponse>) => void): void;
   removeEventListener(type: 'error' | 'messageerror', listener: (event: unknown) => void): void;
   terminate?: () => void;
 }
@@ -98,7 +98,7 @@ export function createENAWorkerClient(worker: ENAWorkerLike): ENAWorkerClient {
     for (const id of [...pending.keys()]) settle(id)?.reject(error);
   };
 
-  const onMessage = (event: MessageEvent<ENAWorkerResponse>): void => {
+  const onMessage = (event: ENAWorkerMessageEvent<ENAWorkerResponse>): void => {
     const response = event.data;
     if (!isWorkerResponse(response)) return;
     const request = pending.get(response.id);
