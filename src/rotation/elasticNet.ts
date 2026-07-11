@@ -25,10 +25,6 @@ function softThreshold(value: number, penalty: number): number {
   return 0;
 }
 
-function columnMean(matrix: Matrix, col: number): number {
-  return matrix.reduce((sum, row) => sum + (row[col] ?? 0), 0) / matrix.length;
-}
-
 function squaredNormColumn(matrix: Matrix, col: number): number {
   return matrix.reduce((sum, row) => {
     const value = row[col] ?? 0;

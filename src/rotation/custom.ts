@@ -15,8 +15,7 @@ import {
   l2Norm,
   meanColumns,
   multiplyMatrices,
-  subtractVectors,
-  transpose
+  subtractVectors
 } from '../core/matrix.js';
 import {
   designSolve,
@@ -71,10 +70,6 @@ function normalizeMeanGroups(groups: MeanRotationParams['groups']): Array<[Group
 
 function rowsByMask(matrix: Matrix, mask: boolean[]): Matrix {
   return matrix.filter((_row, index) => mask[index] ?? false);
-}
-
-function column(matrix: Matrix, index: number): number[] {
-  return matrix.map((row) => row[index] ?? 0);
 }
 
 function columnsToMatrix(columns: number[][], rows: number): Matrix {
