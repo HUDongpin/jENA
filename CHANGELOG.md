@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0 - 2026-07-11
+
+### Verified
+
+- **`regression`, `regression2`, and single-covariate `generalized` rotations are now golden-verified against rENA 0.3.1** (advisory F-002): 12 configurations across three datasets (x-only, x+y, multi-term formulas with interactions, `select2Groups`), asserting points, node positions, rotation-column names, rotation-matrix columns up to sign, and junk-aware variance shares. New `fixtures/goldens/rotations.generated.json` + `npm run goldens:rotations`.
+
+### Fixed (parity with rENA)
+
+- The y-direction of `regression`/`regression2` rotations is now computed from the **original** points, matching rENA's actual behavior (its `with.ena.matrix` rebinds `V`, shadowing the deflated copy), and the two leading axes are no longer re-orthogonalized (rENA keeps them raw).
+- Rotation assembly completes the basis with the SVD of the deflated data like rENA, but keeps only genuinely-spanned directions and completes the remainder orthogonally to the data — avoiding an rENA artifact where LAPACK's arbitrary null-space basis absorbs a real variance share (~5% on the research fixture; see NUMERICS.md).
+- `generalized` rotation's secondary axis (`x1`) now uses the unadjusted `lm(V ~ target)` fit (rENA's `Vx1`) rather than the covariate-adjusted effect.
+- Regression design solves are ridge-free like R's `lm` (`designSolve` default ridge 0); node positioning keeps its documented 1e-10 ridge.
+- Duplicate rotation column names (e.g. two `V_reg` axes) get R `make.unique` suffixes (`V_reg.1`) so point/node row keys cannot collide.
+
+### Changed
+
+- Golden variance assertions are junk-aware: shares are compared renormalized over directions that carry variance on both sides (identical to the previous strict check for SVD/mean rotations).
+- `hena`, `spherical`, and multi-covariate `generalized` rotations remain experimental (`cv.glmnet` randomization makes the latter unverifiable even against rENA itself).
+
 ## 0.2.0 - 2026-07-11
 
 ### Fixed (correctness)

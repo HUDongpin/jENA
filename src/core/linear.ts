@@ -93,7 +93,11 @@ export function gramSchmidtComplete(columns: Matrix, dimension: number, toleranc
   return Array.from({ length: dimension }, (_unused, row) => basisColumns.map((column) => column[row] ?? 0));
 }
 
-export function designSolve(design: Matrix, response: Matrix, ridge = 1e-10): Matrix {
+// Ridge-free by default: R's lm solves regression designs with plain QR, and
+// even a 1e-10 ridge shifts regression-rotation directions by ~1e-9, which is
+// visible against rENA goldens. Node positioning keeps its own explicit ridge
+// via solveLinearSystem (see NUMERICS.md).
+export function designSolve(design: Matrix, response: Matrix, ridge = 0): Matrix {
   const xt = transpose(design);
   const xtx = multiplyMatrices(xt, design);
   const xty = multiplyMatrices(xt, response);

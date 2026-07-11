@@ -45,6 +45,8 @@ interface FormulaSpec {
 interface GmrResult {
   direction: number[];
   fittedMainEffect: Matrix;
+  /** lm(V ~ target) fit before any covariate adjustment (rENA's Vx1). */
+  fittedUnadjusted: Matrix;
   target: Scalar[];
 }
 
@@ -106,6 +108,59 @@ function orthogonalSvd(data: Matrix, leadingColumns: number[][]): Matrix {
 
 function makeColumnNames(prefix: string, count: number, start = 1): string[] {
   return Array.from({ length: count }, (_unused, index) => `${prefix}${index + start}`);
+}
+
+// R's make.unique semantics: repeated names gain .1, .2, ... suffixes, which
+// is how rENA's duplicate regression column names surface in its data frames
+// (and keeps Row keys from colliding here).
+function makeUniqueNames(names: string[]): string[] {
+  const seen = new Map<string, number>();
+  return names.map((name) => {
+    const count = seen.get(name) ?? 0;
+    seen.set(name, count + 1);
+    return count === 0 ? name : `${name}.${count}`;
+  });
+}
+
+/**
+ * rENA's regression/generalized rotation assembly: deflate the points
+ * sequentially by each leading vector, complete the basis with the SVD of
+ * the deflated data, and DO NOT re-orthogonalize the leading vectors
+ * themselves (matching ena.rotate.by.hena.regression / .generalized).
+ *
+ * One deliberate improvement over rENA: only directions genuinely spanned by
+ * the deflated data are taken from its SVD; the rest of the basis is
+ * completed orthogonally to everything already kept, so numerically-null
+ * directions carry exactly zero data variance. rENA (via prcomp/LAPACK)
+ * returns an arbitrary null-space basis instead, which can silently absorb a
+ * share of the variance and contaminate every reported share — see
+ * NUMERICS.md.
+ */
+function assembleRotation(points: Matrix, leading: number[][], leadingNames: string[]): SvdRotationResult {
+  const width = points[0]?.length ?? 0;
+  let deflated = points;
+  for (const vector of leading) deflated = subtractOuterProjection(deflated, vector);
+  const svd = svdRotation(deflated);
+  const leadingEigenvalue = svd.eigenvalues[0] ?? 0;
+  const rankThreshold = Math.max(Number.MIN_VALUE, leadingEigenvalue * 1e-12);
+  const significant = Math.min(
+    svd.eigenvalues.filter((value) => value > rankThreshold).length,
+    Math.max(0, width - leading.length)
+  );
+  const columns = [...leading];
+  for (let index = 0; index < significant; index += 1) {
+    columns.push(svd.rotationMatrix.map((row) => row[index] ?? 0));
+  }
+  const completed = gramSchmidtComplete(columns, width);
+  for (let index = columns.length; index < width; index += 1) {
+    columns.push(completed.map((row) => row[index] ?? 0));
+  }
+  const residualCount = Math.max(0, width - leading.length);
+  return {
+    rotationMatrix: combineRotationColumns(columns),
+    rotationColumns: makeUniqueNames([...leadingNames, ...makeColumnNames('SVD', residualCount, leading.length + 1)]),
+    eigenvalues: []
+  };
 }
 
 function rotateWithLeadingColumns(data: Matrix, leadingColumns: number[][], leadingNames: string[]): SvdRotationResult {
@@ -207,7 +262,8 @@ function gmr(points: Matrix, rows: Row[], vars: string[]): GmrResult {
   const targetEncoded = encodeVector(target);
   const numericTarget = isNumericVector(target);
   const simple = simpleLinearFit(points, targetEncoded);
-  let fittedMainEffect = numericTarget ? simple.fitted : categoricalMainEffect(points, target);
+  const fittedUnadjusted = numericTarget ? simple.fitted : categoricalMainEffect(points, target);
+  let fittedMainEffect = fittedUnadjusted;
 
   if (vars.length > 1) {
     const design = buildMetadataDesign(rows, vars);
@@ -221,6 +277,7 @@ function gmr(points: Matrix, rows: Row[], vars: string[]): GmrResult {
     return {
       direction: normalizeVector(simple.coefficients[1] ?? []),
       fittedMainEffect,
+      fittedUnadjusted,
       target
     };
   }
@@ -230,6 +287,7 @@ function gmr(points: Matrix, rows: Row[], vars: string[]): GmrResult {
   return {
     direction: normalizeVector(eigen.eigenvectors.map((row) => row[0] ?? 0)),
     fittedMainEffect,
+    fittedUnadjusted,
     target
   };
 }
@@ -251,7 +309,9 @@ export function rotateByGeneralized(pointsForProjection: Matrix, enadata: ENADat
   }
 
   if (!x1) {
-    const svd = svdRotation(x.fittedMainEffect);
+    // rENA: x1 = svd(Vx1)$v[,1], the leading right singular vector of the
+    // UNADJUSTED lm(V ~ target) fit (not the covariate-adjusted effect).
+    const svd = svdRotation(x.fittedUnadjusted);
     x1 = svd.rotationMatrix.map((row) => row[0] ?? 0);
   }
 
@@ -265,16 +325,9 @@ export function rotateByGeneralized(pointsForProjection: Matrix, enadata: ENADat
     ? gmr(deflated, enadata.metaData, resolveVarNames(params.yVar)).direction
     : svdRotation(deflated).rotationMatrix.map((row) => row[0] ?? 0);
   const yName = params.yVar ? 'RR2' : 'SVD2';
-  const deflatedByBoth = subtractOuterProjection(subtractOuterProjection(a, x.direction), yDirection);
-  const residual = svdRotation(deflatedByBoth).rotationMatrix;
-  const residualCount = Math.max(0, (a[0]?.length ?? 0) - 2);
-  const columns = [x.direction, normalizeVector(yDirection)];
-  for (let index = 0; index < residualCount; index += 1) columns.push(residual.map((row) => row[index] ?? 0));
-  return {
-    rotationMatrix: combineRotationColumns(columns).map((row) => row.slice(0, a[0]?.length ?? 0)),
-    rotationColumns: ['RR1', yName, ...makeColumnNames('SVD', residualCount, 3)],
-    eigenvalues: []
-  };
+  // rENA's final deflation is by x and y only (the intermediate x1 deflation
+  // does not appear in the completed basis).
+  return assembleRotation(a, [x.direction, normalizeVector(yDirection)], ['RR1', yName]);
 }
 
 function stripLmWrapper(formula: string): string {
@@ -366,31 +419,33 @@ function vCoefficientVectorFromRegression(points: Matrix, rows: Row[], formula: 
 }
 
 export function rotateByRegression(pointsForProjection: Matrix, enadata: ENAData, params: RegressionRotationParams): SvdRotationResult {
-  const x = firstPredictorVectorFromRegression(pointsForProjection, enadata.metaData, params.xVar, enadata.codeColumns[0] ?? 'V');
-  let deflated = subtractOuterProjection(pointsForProjection, x.vector);
+  const fallbackName = enadata.codeColumns[0] ?? 'V';
+  const x = firstPredictorVectorFromRegression(pointsForProjection, enadata.metaData, params.xVar, fallbackName);
   const columns = [x.vector];
   const names = [x.name];
   if (params.yVar) {
-    const y = firstPredictorVectorFromRegression(deflated, enadata.metaData, params.yVar, enadata.codeColumns[0] ?? 'V');
+    // rENA evaluates the y formula with V rebound to the ORIGINAL points
+    // (with.ena.matrix shadows the deflated copy), so the y direction is
+    // also computed from the undeflated data.
+    const y = firstPredictorVectorFromRegression(pointsForProjection, enadata.metaData, params.yVar, fallbackName);
     columns.push(y.vector);
     names.push(y.name);
-    deflated = subtractOuterProjection(deflated, y.vector);
   }
-  return rotateWithLeadingColumns(deflated, columns, names);
+  return assembleRotation(pointsForProjection, columns, names);
 }
 
 export function rotateByRegression2(pointsForProjection: Matrix, enadata: ENAData, params: RegressionRotationParams): SvdRotationResult {
   const x = vCoefficientVectorFromRegression(pointsForProjection, enadata.metaData, params.xVar);
-  let deflated = subtractOuterProjection(pointsForProjection, x.vector);
   const columns = [x.vector];
   const names = [x.name];
   if (params.yVar) {
-    const y = vCoefficientVectorFromRegression(deflated, enadata.metaData, params.yVar);
+    // Same V-shadowing as rotateByRegression: rENA's y regression sees the
+    // original points, not the deflated ones.
+    const y = vCoefficientVectorFromRegression(pointsForProjection, enadata.metaData, params.yVar);
     columns.push(y.vector);
     names.push(y.name);
-    deflated = subtractOuterProjection(deflated, y.vector);
   }
-  return rotateWithLeadingColumns(deflated, columns, names);
+  return assembleRotation(pointsForProjection, columns, names);
 }
 
 function henaPredictorColumns(rows: Row[], params: HenaRotationParams): { matrix: Matrix; names: string[]; both: string[] } {

@@ -2,6 +2,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { accumulateData, ena, refWindowMatrix, rowsToCoOccurrences, sphereNorm } from "../src/index.js";
 import type { Matrix, Row } from "../src/index.js";
+import {
+  codeColumns,
+  expectMatrixClose,
+  expectProjectionParity,
+  expectStringColumns,
+  matrixFromRows
+} from "./golden-helpers.js";
 
 const fixturePath = new URL("../fixtures/goldens/sena-configs.generated.json", import.meta.url);
 
@@ -64,81 +71,6 @@ type DatasetSpec = {
   trajectoryColumns: string[];
 };
 
-// Shares below this threshold correspond to numerically null directions where
-// eigenvector orientation is arbitrary, so those columns are not comparable.
-const NEGLIGIBLE_VARIANCE_SHARE = 1e-9;
-
-function codeColumns(codes: string[]) {
-  const columns: string[] = [];
-  for (let target = 1; target < codes.length; target += 1) {
-    for (let source = 0; source < target; source += 1) {
-      columns.push(`${codes[source]} & ${codes[target]}`);
-    }
-  }
-  return columns;
-}
-
-function matrixFromRows(rows: Row[], columns: string[]): Matrix {
-  return rows.map((row) => columns.map((column) => Number(row[column] ?? 0)));
-}
-
-function expectMatrixClose(actual: Matrix, expected: Matrix, precision = 12) {
-  expect(actual.length).toBe(expected.length);
-  for (let row = 0; row < expected.length; row += 1) {
-    expect(actual[row]?.length).toBe(expected[row]?.length);
-    for (let column = 0; column < (expected[row]?.length ?? 0); column += 1) {
-      expect(actual[row]?.[column] ?? 0).toBeCloseTo(expected[row]?.[column] ?? 0, precision);
-    }
-  }
-}
-
-// rENA dimension signs are arbitrary (SVD sign indeterminacy), so columns are
-// compared up to a per-column sign chosen by the dot product with the golden.
-function columnSign(actual: number[], expected: number[]): number {
-  const dot = expected.reduce((total, value, index) => total + value * (actual[index] ?? 0), 0);
-  return dot < 0 ? -1 : 1;
-}
-
-type Tolerance = { atol: number; rtol: number };
-
-const POINT_TOLERANCE: Tolerance = { atol: 5e-7, rtol: 0 };
-// Node positions solve least-squares systems that are singular on these small
-// fixtures (rENA's own solver warns "system is singular; attempting approx
-// solution" here). jena's documented 1e-10 ridge and Armadillo's approximate
-// solve both approach the same minimum-norm solution, but only to a few 1e-6
-// — see NUMERICS.md. Semantic regressions move nodes by orders of magnitude
-// more than this bound.
-const NODE_TOLERANCE: Tolerance = { atol: 4e-6, rtol: 2e-6 };
-
-function expectProjectedRowsClose(actual: Row[], expected: Row[], columns: string[], tolerance: Tolerance) {
-  expect(actual.length).toBe(expected.length);
-  for (const column of columns) {
-    const actualValues = actual.map((row) => Number(row[column] ?? 0));
-    const expectedValues = expected.map((row) => Number(row[column] ?? 0));
-    const sign = columnSign(actualValues, expectedValues);
-    for (let row = 0; row < expectedValues.length; row += 1) {
-      const expectedValue = expectedValues[row] ?? 0;
-      const difference = Math.abs((actualValues[row] ?? 0) * sign - expectedValue);
-      const bound = tolerance.atol + tolerance.rtol * Math.abs(expectedValue);
-      expect(difference, `${column} row ${row}: |${(actualValues[row] ?? 0) * sign} - ${expectedValue}|`).toBeLessThanOrEqual(bound);
-    }
-  }
-}
-
-function expectStringColumns(actual: Row[], expected: Row[], columns: string[]) {
-  expect(actual.length).toBe(expected.length);
-  for (let row = 0; row < expected.length; row += 1) {
-    for (const column of columns) {
-      expect(String(actual[row]?.[column] ?? "")).toBe(String(expected[row]?.[column] ?? ""));
-    }
-  }
-}
-
-function fixtureRotationColumns(config: GoldenConfig): string[] {
-  const first = config.rotationMatrix[0] ?? {};
-  return Object.keys(first).filter((key) => key !== "codes");
-}
-
 if (!existsSync(fixturePath)) {
   describe.skip("R golden parity", () => {
     it("requires fixtures/goldens/sena-configs.generated.json from npm run goldens:r", () => undefined);
@@ -185,48 +117,7 @@ if (!existsSync(fixturePath)) {
         });
 
         expectMatrixClose(matrixFromRows(set.lineWeights, datasetColumns), matrixFromRows(config.lineWeights, datasetColumns), 12);
-
-        // rENA's rotation columns (rank-retained) must be a prefix of ours.
-        const goldenColumns = fixtureRotationColumns(config);
-        expect(set.rotation.rotationColumns.slice(0, goldenColumns.length)).toEqual(goldenColumns);
-
-        // Projected points and node positions for the displayed dimensions.
-        const displayColumns = goldenColumns.slice(0, config.options.dimensions);
-        expectProjectedRowsClose(set.points, config.points, displayColumns, POINT_TOLERANCE);
-        const nodes = set.rotation.nodes ?? [];
-        expectStringColumns(nodes, config.nodes, ["code"]);
-        expectProjectedRowsClose(nodes, config.nodes, displayColumns, NODE_TOLERANCE);
-
-        // Variance explained is normalized over ALL rotated dimensions (F-001).
-        const shares = set.rotation.rotationColumns.map((column) => set.variance[column] ?? 0);
-        expect(shares.length).toBeGreaterThanOrEqual(config.variance.length);
-        for (let index = 0; index < config.variance.length; index += 1) {
-          expect(shares[index] ?? 0).toBeCloseTo(config.variance[index] ?? 0, 9);
-        }
-        for (let index = config.variance.length; index < shares.length; index += 1) {
-          expect(Math.abs(shares[index] ?? 0)).toBeLessThan(NEGLIGIBLE_VARIANCE_SHARE);
-        }
-
-        // Full rotation matrix, column-by-column up to sign, for every
-        // direction that carries non-negligible variance.
-        const jenaRotationRows = new Map<string, number[]>();
-        set.rotation.rotationMatrix.forEach((row, index) => {
-          jenaRotationRows.set(datasetColumns[index] ?? String(index), row);
-        });
-        for (let columnIndex = 0; columnIndex < goldenColumns.length; columnIndex += 1) {
-          if ((config.variance[columnIndex] ?? 0) < NEGLIGIBLE_VARIANCE_SHARE) continue;
-          const columnName = goldenColumns[columnIndex] ?? "";
-          const expectedColumn = config.rotationMatrix.map((row) => Number(row[columnName] ?? 0));
-          const actualColumn = config.rotationMatrix.map((row) => {
-            const jenaRow = jenaRotationRows.get(String(row.codes ?? ""));
-            expect(jenaRow, `rotation row for ${String(row.codes)}`).toBeTruthy();
-            return jenaRow?.[columnIndex] ?? 0;
-          });
-          const sign = columnSign(actualColumn, expectedColumn);
-          for (let row = 0; row < expectedColumn.length; row += 1) {
-            expect((actualColumn[row] ?? 0) * sign).toBeCloseTo(expectedColumn[row] ?? 0, 6);
-          }
-        }
+        expectProjectionParity(set, config, datasetColumns, config.options.dimensions);
       });
     }
   }

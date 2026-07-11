@@ -74,8 +74,11 @@ Everything in the **verified** tier is tested against golden outputs generated f
 | `projectIn` (rotation-set reuse) | ✅ Verified | Self-projection invariant + shared machinery |
 | Stats: `enaCorrelations`, `cohensD` | ✅ Verified | vs `rENA::ena.correlations` / `fun_cohens.d` |
 | Stats: Welch t, one-way ANOVA (`enaStats`) | ✅ Verified | vs R `t.test` / `aov`; **no p-values** — statistic + df only |
+| Rotations: `regression`, `regression2` | ✅ Verified | vs `ena.rotate.by.hena.regression`/`_2` — x-only, x+y, and multi-term formulas (12 golden configs) |
+| Rotation: `generalized` (single covariate) | ✅ Verified | vs `ena.rotate.by.generalized` incl. `select2Groups`; variance compared junk-aware (see NUMERICS.md) |
 | Streaming/chunked accumulation | ⚠️ Equivalence-tested | Matches batch on all golden configs; no independent rENA goldens |
-| Rotations: `generalized`, `regression`, `regression2`, `hena`, `spherical` | 🧪 Experimental | **Not verified against rENA**; elastic-net and formula handling are approximations (see NUMERICS.md) |
+| Rotation: `generalized` with multiple covariates | 🧪 Experimental | rENA runs this through `cv.glmnet` with randomized folds — not reproducible even by rENA itself; jena uses a deterministic elastic net |
+| Rotations: `hena`, `spherical` | 🧪 Experimental | **Not verified against rENA** |
 | Directed node positions | 🧪 Experimental | Throws on this pipeline's undirected models; only usable with external n×n directed adjacency data |
 | Plot adapters, SVG renderer | 🧪 Experimental | Untested convenience helpers |
 | Worker client | 🧪 Experimental | Progress/cancel are coarse (single-run granularity); function-valued `weightBy` cannot cross `postMessage` |

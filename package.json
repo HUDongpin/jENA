@@ -1,6 +1,6 @@
 {
   "name": "jena-js",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Standalone TypeScript/JavaScript library for Epistemic Network Analysis, ported from rENA for browser and Node runtimes.",
   "type": "module",
   "license": "GPL-3.0-only",
@@ -69,6 +69,7 @@
     "pack:check": "node scripts/pack-check.mjs",
     "goldens:r": "Rscript scripts/regen-goldens-rstudio.R .",
     "goldens:stats": "Rscript scripts/generate-stats-goldens.R .",
+    "goldens:rotations": "Rscript scripts/generate-rotation-goldens.R .",
     "goldens:diff": "node scripts/compare-goldens.mjs",
     "goldens:compare": "vitest run tests/r-goldens.test.ts"
   },
