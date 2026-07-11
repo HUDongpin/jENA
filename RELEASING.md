@@ -58,8 +58,10 @@ gh release create vX.Y.Z --title "jena-js X.Y.Z" --notes "<highlights + CHANGELO
 
 ## 5. Post-release smoke test
 
-Install from the public registry into a scratch directory and run a small
-model through the root and at least one subpath:
+The registry's read replicas lag the publish by up to a minute or two — poll
+`npm view jena-js version` until it reports the new version before testing.
+Then install from the public registry into a scratch directory and run a
+small model through the root and at least one subpath:
 
 ```bash
 mkdir /tmp/consumer && cd /tmp/consumer && npm init -y && npm install jena-js
