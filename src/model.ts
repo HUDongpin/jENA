@@ -13,6 +13,7 @@ import type {
   SphericalRotationParams
 } from './types.js';
 import { centerData, meanColumns, multiplyMatrices, sphereNorm, varianceColumns } from './core/matrix.js';
+import { validateMakeSetOptions } from './core/validate.js';
 import { svdRotation } from './rotation/svd.js';
 import {
   centroidsAsRows,
@@ -173,6 +174,7 @@ function makeNodePositions(lineWeights: Matrix, points: Matrix, codeCount: numbe
 }
 
 export function makeSet(enadata: ENAData, options: MakeSetOptions = {}): ENASet {
+  validateMakeSetOptions(options);
   const dimensions = options.dimensions ?? 2;
   const centerAlignToOrigin = options.centerAlignToOrigin ?? true;
   const lineWeightsMatrix = sphereNorm(enadata.connectionMatrix);

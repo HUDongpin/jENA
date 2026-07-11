@@ -11,6 +11,7 @@ import {
 } from './core/index.js';
 import { addMergedColumn, groupBy, mergeColumns, sumRowsBy } from './core/table.js';
 import { assertNonEmptyColumns, assertRowsHaveColumns } from './core/guards.js';
+import { validateAccumulateOptions } from './core/validate.js';
 
 function normalizeModel(model: ModelType | undefined): ModelType {
   return model ?? 'EndPoint';
@@ -227,6 +228,7 @@ function makeTrajectoryCounts(rowConnections: Row[], units: string[], conversati
 }
 
 export function accumulateData(options: AccumulateOptions): ENAData {
+  validateAccumulateOptions(options);
   const rows = options.rows;
   const units = options.units;
   const conversation = options.conversation;
@@ -268,6 +270,9 @@ export function accumulateData(options: AccumulateOptions): ENAData {
   const countedRowConnections = unitFilter
     ? rowConnectionCounts.filter((row) => unitFilter.has(String(row.ENA_UNIT ?? '')))
     : rowConnectionCounts;
+  if (unitFilter && countedRowConnections.length === 0) {
+    throw new Error('unitsUsed did not match any accumulated units; check the labels against the merged unit column (units joined with ".").');
+  }
   if (model === 'EndPoint') {
     countRows = makeEndpointCounts(countedRowConnections, units, codeColumns);
     const countUnits = new Set(countRows.map((row) => String(row.ENA_UNIT ?? '')));

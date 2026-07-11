@@ -7,6 +7,7 @@ import {
 } from './core/index.js';
 import { assertNonEmptyColumns, assertRowsHaveColumns } from './core/guards.js';
 import { mergeColumns } from './core/table.js';
+import { validateAccumulateOptions } from './core/validate.js';
 
 export interface NumericTable {
   data: Float64Array;
@@ -692,6 +693,7 @@ export function accumulateDataChunked(options: ChunkedAccumulateOptions): ENADat
 export function createAccumulationStream(options: StreamingAccumulateOptions): AccumulationStream {
   const { rows: initialRows, chunkSize = 10_000, expectedRows, onProgress } = options;
   if (chunkSize <= 0 || !Number.isFinite(chunkSize)) throw new Error('chunkSize must be a positive finite number.');
+  validateAccumulateOptions(options, { requireRows: false });
   const internals = makeInternals(options);
   const state: AccumulationChunkState = {
     rowsSeen: 0,
