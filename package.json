@@ -48,7 +48,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "goldens:r": "Rscript scripts/generate-r-goldens.R reference/rENA-main fixtures/goldens",
+    "goldens:r": "Rscript scripts/regen-goldens-rstudio.R .",
+    "goldens:diff": "node scripts/compare-goldens.mjs",
     "goldens:compare": "vitest run tests/r-goldens.test.ts"
   },
   "dependencies": {},

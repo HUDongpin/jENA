@@ -93,7 +93,14 @@ export interface ENAData {
 export interface RotationSet {
   codes: string[];
   adjacencyKey: AdjacencyKeyEntry[];
+  /**
+   * Full rotation matrix over all rotated dimensions, matching rENA's
+   * rotation sets. Display output (`points`, `nodes`) is truncated to
+   * `MakeSetOptions.dimensions`, but projection and variance always use the
+   * full matrix.
+   */
   rotationMatrix: Matrix;
+  /** Names for every column of `rotationMatrix` (e.g. SVD1..SVDn, MR1). */
   rotationColumns: string[];
   eigenvalues: number[];
   centerVector: number[];
@@ -105,6 +112,12 @@ export interface ENASet extends ENAData {
   pointsForProjection: Row[];
   points: Row[];
   rotation: RotationSet;
+  /**
+   * Share of variance explained per rotated dimension, keyed by rotation
+   * column name and normalized across ALL rotated dimensions (rENA
+   * semantics), so the values do not sum to 1 over just the displayed
+   * dimensions.
+   */
   variance: Record<string, number>;
   centroids?: Row[];
 }

@@ -47,10 +47,6 @@ function selectMatrixColumns(matrix: Matrix, count: number): Matrix {
   return matrix.map((row) => row.slice(0, count));
 }
 
-function selectRotationColumns(rotationMatrix: Matrix, count: number): Matrix {
-  return rotationMatrix.map((row) => row.slice(0, count));
-}
-
 function rowHasSignal(row: number[]): boolean {
   return row.reduce((sum, value) => sum + value, 0) !== 0;
 }
@@ -171,19 +167,22 @@ export function makeSet(enadata: ENAData, options: MakeSetOptions = {}): ENASet 
   const rotationResult = makeRotation(enadata, pointsForProjection, options);
   const dimCount = Math.min(dimensions, rotationResult.rotationColumns.length);
   const dimensionNames = rotationResult.rotationColumns.slice(0, dimCount);
-  const selectedRotation = selectRotationColumns(rotationResult.rotationMatrix, dimCount);
-  const pointsMatrix = multiplyMatrices(pointsForProjection, selectedRotation);
+  // rENA projects onto the full rotation matrix (ena.make.set.R: points <-
+  // points.for.projection %*% rotation.matrix) and normalizes variance across
+  // ALL rotated dimensions; only display output is truncated to `dimensions`.
+  const fullPointsMatrix = multiplyMatrices(pointsForProjection, rotationResult.rotationMatrix);
+  const pointsMatrix = selectMatrixColumns(fullPointsMatrix, dimCount);
   const nodePositionResult = makeNodePositions(lineWeightsMatrix, pointsMatrix, enadata.codes.length, options);
-  const variances = varianceColumns(pointsMatrix);
+  const variances = varianceColumns(fullPointsMatrix);
   const varianceTotal = variances.reduce((sum, value) => sum + value, 0);
-  const variance = Object.fromEntries(dimensionNames.map((name, index) => [name, varianceTotal === 0 ? 0 : (variances[index] ?? 0) / varianceTotal]));
+  const variance = Object.fromEntries(rotationResult.rotationColumns.map((name, index) => [name, varianceTotal === 0 ? 0 : (variances[index] ?? 0) / varianceTotal]));
 
   const rotation: RotationSet = {
     codes: enadata.codes,
     adjacencyKey: enadata.adjacencyKey,
-    rotationMatrix: selectedRotation,
-    rotationColumns: dimensionNames,
-    eigenvalues: rotationResult.eigenvalues.slice(0, dimCount),
+    rotationMatrix: rotationResult.rotationMatrix,
+    rotationColumns: rotationResult.rotationColumns,
+    eigenvalues: rotationResult.eigenvalues,
     centerVector,
     nodes: options.rotationSet?.nodes ?? nodesAsRows(enadata.codes, nodePositionResult.nodes, dimensionNames)
   };

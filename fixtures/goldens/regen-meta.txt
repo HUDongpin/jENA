@@ -1,0 +1,6 @@
+started: 2026-07-08 23:31:47 HKT
+R: R version 4.4.2 (2024-10-31)
+rENA: 0.3.1
+tma: 0.3.1
+wrote: /Users/dongpinhu/Desktop/jena-js/fixtures/goldens/sena-configs.regenerated.json
+status: OK

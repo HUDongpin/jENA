@@ -105,10 +105,21 @@ export function designSolve(design: Matrix, response: Matrix, ridge = 1e-10): Ma
   return transpose(coefficientsByColumn);
 }
 
-export function symmetricJacobiEigen(input: Matrix, maxIterations = Math.max(200, input.length * input.length * 20), tolerance = 1e-12): EigenResult {
+export function symmetricJacobiEigen(input: Matrix, maxIterations = Math.max(200, input.length * input.length * 20), tolerance?: number): EigenResult {
   const n = input.length;
   const a = cloneMatrix(input);
-  let v = identity(n);
+  const v = identity(n);
+
+  // Stop once the largest off-diagonal is at machine precision relative to
+  // the matrix scale; an absolute cutoff would leave eigenvectors of
+  // closely-spaced eigenvalues visibly less accurate than LAPACK's.
+  let scale = 0;
+  for (let i = 0; i < n; i += 1) {
+    for (let j = 0; j < n; j += 1) {
+      scale = Math.max(scale, Math.abs(a[i]?.[j] ?? 0));
+    }
+  }
+  const stopThreshold = tolerance ?? Math.max(Number.MIN_VALUE, scale * 1e-15);
 
   for (let iteration = 0; iteration < maxIterations; iteration += 1) {
     let p = 0;
@@ -124,7 +135,7 @@ export function symmetricJacobiEigen(input: Matrix, maxIterations = Math.max(200
         }
       }
     }
-    if (max < tolerance || n < 2) break;
+    if (max < stopThreshold || n < 2) break;
 
     const app = a[p]?.[p] ?? 0;
     const aqq = a[q]?.[q] ?? 0;
@@ -153,18 +164,17 @@ export function symmetricJacobiEigen(input: Matrix, maxIterations = Math.max(200
     if (rowP) rowP[q] = 0;
     if (rowQ) rowQ[p] = 0;
 
-    const rotation = identity(n);
-    const rotationP = rotation[p];
-    const rotationQ = rotation[q];
-    if (rotationP) {
-      rotationP[p] = c;
-      rotationP[q] = s;
+    // Accumulate the rotation into the two affected eigenvector columns in
+    // place (O(n)) instead of a full n x n matrix multiply per rotation.
+    for (let i = 0; i < n; i += 1) {
+      const vectorRow = v[i];
+      const vip = vectorRow?.[p] ?? 0;
+      const viq = vectorRow?.[q] ?? 0;
+      if (vectorRow) {
+        vectorRow[p] = c * vip - s * viq;
+        vectorRow[q] = s * vip + c * viq;
+      }
     }
-    if (rotationQ) {
-      rotationQ[p] = -s;
-      rotationQ[q] = c;
-    }
-    v = multiplyMatrices(v, rotation);
   }
 
   const pairs = Array.from({ length: n }, (_, i) => ({ value: a[i]?.[i] ?? 0, index: i }))

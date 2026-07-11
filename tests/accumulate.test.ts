@@ -39,6 +39,14 @@ describe("accumulateData", () => {
     expect(set.lineWeights).toHaveLength(2);
     expect(set.points).toHaveLength(2);
     expect(set.rotation.nodes).toHaveLength(3);
-    expect(Object.keys(set.variance)).toEqual(["SVD1", "SVD2"]);
+    // The rotation set carries every rotated dimension (rENA parity); the
+    // variance shares are normalized across all of them and sum to 1.
+    expect(set.rotation.rotationColumns).toEqual(["SVD1", "SVD2", "SVD3"]);
+    expect(Object.keys(set.variance)).toEqual(["SVD1", "SVD2", "SVD3"]);
+    const shareTotal = Object.values(set.variance).reduce((sum, value) => sum + value, 0);
+    expect(shareTotal).toBeCloseTo(1, 9);
+    // Displayed points remain truncated to the requested dimensions.
+    expect(set.points[0]).toHaveProperty("SVD2");
+    expect(set.points[0]).not.toHaveProperty("SVD3");
   });
 });

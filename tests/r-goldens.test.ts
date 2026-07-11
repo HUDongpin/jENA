@@ -36,6 +36,14 @@ type GoldenDataset = {
 };
 
 type GoldenFixture = GoldenDataset & {
+  meta?: {
+    generatedAt?: string;
+    rVersion?: string;
+    platform?: string;
+    rENAVersion?: string;
+    tmaVersion?: string;
+    generatorScript?: string;
+  };
   lowLevel: {
     rowsToCoOccurrencesBinary: Matrix;
     rowsToCoOccurrencesWeighted: Matrix;
@@ -54,10 +62,11 @@ type DatasetSpec = {
   conversation: string[];
   metadata: string[];
   trajectoryColumns: string[];
-  endpointConfigName: string;
-  pointIdColumn: string;
-  meanRotationConfigName: string;
 };
+
+// Shares below this threshold correspond to numerically null directions where
+// eigenvector orientation is arbitrary, so those columns are not comparable.
+const NEGLIGIBLE_VARIANCE_SHARE = 1e-9;
 
 function codeColumns(codes: string[]) {
   const columns: string[] = [];
@@ -83,24 +92,35 @@ function expectMatrixClose(actual: Matrix, expected: Matrix, precision = 12) {
   }
 }
 
-function signForRows(expected: Row[], actual: Row[], column: string, idColumn: string) {
-  const actualById = new Map(actual.map((row) => [String(row[idColumn]), row]));
-  const dot = expected.reduce((total, expectedRow) => {
-    const actualRow = actualById.get(String(expectedRow[idColumn]));
-    return total + Number(expectedRow[column] ?? 0) * Number(actualRow?.[column] ?? 0);
-  }, 0);
+// rENA dimension signs are arbitrary (SVD sign indeterminacy), so columns are
+// compared up to a per-column sign chosen by the dot product with the golden.
+function columnSign(actual: number[], expected: number[]): number {
+  const dot = expected.reduce((total, value, index) => total + value * (actual[index] ?? 0), 0);
   return dot < 0 ? -1 : 1;
 }
 
-function expectProjectedRowsClose(actual: Row[], expected: Row[], idColumn: string, columns: string[], precision = 6) {
+type Tolerance = { atol: number; rtol: number };
+
+const POINT_TOLERANCE: Tolerance = { atol: 5e-7, rtol: 0 };
+// Node positions solve least-squares systems that are singular on these small
+// fixtures (rENA's own solver warns "system is singular; attempting approx
+// solution" here). jena's documented 1e-10 ridge and Armadillo's approximate
+// solve both approach the same minimum-norm solution, but only to a few 1e-6
+// — see NUMERICS.md. Semantic regressions move nodes by orders of magnitude
+// more than this bound.
+const NODE_TOLERANCE: Tolerance = { atol: 4e-6, rtol: 2e-6 };
+
+function expectProjectedRowsClose(actual: Row[], expected: Row[], columns: string[], tolerance: Tolerance) {
   expect(actual.length).toBe(expected.length);
-  const actualById = new Map(actual.map((row) => [String(row[idColumn]), row]));
-  const signs = Object.fromEntries(columns.map((column) => [column, signForRows(expected, actual, column, idColumn)]));
-  for (const expectedRow of expected) {
-    const actualRow = actualById.get(String(expectedRow[idColumn]));
-    expect(actualRow).toBeTruthy();
-    for (const column of columns) {
-      expect(Number(actualRow?.[column] ?? 0) * Number(signs[column])).toBeCloseTo(Number(expectedRow[column] ?? 0), precision);
+  for (const column of columns) {
+    const actualValues = actual.map((row) => Number(row[column] ?? 0));
+    const expectedValues = expected.map((row) => Number(row[column] ?? 0));
+    const sign = columnSign(actualValues, expectedValues);
+    for (let row = 0; row < expectedValues.length; row += 1) {
+      const expectedValue = expectedValues[row] ?? 0;
+      const difference = Math.abs((actualValues[row] ?? 0) * sign - expectedValue);
+      const bound = tolerance.atol + tolerance.rtol * Math.abs(expectedValue);
+      expect(difference, `${column} row ${row}: |${(actualValues[row] ?? 0) * sign} - ${expectedValue}|`).toBeLessThanOrEqual(bound);
     }
   }
 }
@@ -112,6 +132,11 @@ function expectStringColumns(actual: Row[], expected: Row[], columns: string[]) 
       expect(String(actual[row]?.[column] ?? "")).toBe(String(expected[row]?.[column] ?? ""));
     }
   }
+}
+
+function fixtureRotationColumns(config: GoldenConfig): string[] {
+  const first = config.rotationMatrix[0] ?? {};
+  return Object.keys(first).filter((key) => key !== "codes");
 }
 
 if (!existsSync(fixturePath)) {
@@ -139,6 +164,17 @@ if (!existsSync(fixturePath)) {
           windowSizeBack: config.options.windowSizeBack,
           windowSizeForward: config.options.windowSizeForward
         });
+
+        expect(data.unitLabels).toEqual(config.unitLabels);
+        expectMatrixClose(matrixFromRows(data.rowConnectionCounts, datasetColumns), matrixFromRows(config.rowConnectionCounts, datasetColumns), 12);
+        expectMatrixClose(matrixFromRows(data.connectionCounts, datasetColumns), matrixFromRows(config.connectionCounts, datasetColumns), 12);
+
+        if (config.trajectories) {
+          expectStringColumns(data.trajectories ?? [], config.trajectories, spec.trajectoryColumns);
+        }
+      });
+
+      it(`matches rENA projection, nodes, variance, and rotation for ${spec.name} ${name}`, () => {
         const set = ena({
           rows: spec.dataset.input,
           units: spec.units,
@@ -148,52 +184,61 @@ if (!existsSync(fixturePath)) {
           ...config.options
         });
 
-        expect(data.unitLabels).toEqual(config.unitLabels);
-        expectMatrixClose(matrixFromRows(data.rowConnectionCounts, datasetColumns), matrixFromRows(config.rowConnectionCounts, datasetColumns), 12);
-        expectMatrixClose(matrixFromRows(data.connectionCounts, datasetColumns), matrixFromRows(config.connectionCounts, datasetColumns), 12);
         expectMatrixClose(matrixFromRows(set.lineWeights, datasetColumns), matrixFromRows(config.lineWeights, datasetColumns), 12);
 
-        if (config.trajectories) {
-          expectStringColumns(data.trajectories ?? [], config.trajectories, spec.trajectoryColumns);
+        // rENA's rotation columns (rank-retained) must be a prefix of ours.
+        const goldenColumns = fixtureRotationColumns(config);
+        expect(set.rotation.rotationColumns.slice(0, goldenColumns.length)).toEqual(goldenColumns);
+
+        // Projected points and node positions for the displayed dimensions.
+        const displayColumns = goldenColumns.slice(0, config.options.dimensions);
+        expectProjectedRowsClose(set.points, config.points, displayColumns, POINT_TOLERANCE);
+        const nodes = set.rotation.nodes ?? [];
+        expectStringColumns(nodes, config.nodes, ["code"]);
+        expectProjectedRowsClose(nodes, config.nodes, displayColumns, NODE_TOLERANCE);
+
+        // Variance explained is normalized over ALL rotated dimensions (F-001).
+        const shares = set.rotation.rotationColumns.map((column) => set.variance[column] ?? 0);
+        expect(shares.length).toBeGreaterThanOrEqual(config.variance.length);
+        for (let index = 0; index < config.variance.length; index += 1) {
+          expect(shares[index] ?? 0).toBeCloseTo(config.variance[index] ?? 0, 9);
+        }
+        for (let index = config.variance.length; index < shares.length; index += 1) {
+          expect(Math.abs(shares[index] ?? 0)).toBeLessThan(NEGLIGIBLE_VARIANCE_SHARE);
+        }
+
+        // Full rotation matrix, column-by-column up to sign, for every
+        // direction that carries non-negligible variance.
+        const jenaRotationRows = new Map<string, number[]>();
+        set.rotation.rotationMatrix.forEach((row, index) => {
+          jenaRotationRows.set(datasetColumns[index] ?? String(index), row);
+        });
+        for (let columnIndex = 0; columnIndex < goldenColumns.length; columnIndex += 1) {
+          if ((config.variance[columnIndex] ?? 0) < NEGLIGIBLE_VARIANCE_SHARE) continue;
+          const columnName = goldenColumns[columnIndex] ?? "";
+          const expectedColumn = config.rotationMatrix.map((row) => Number(row[columnName] ?? 0));
+          const actualColumn = config.rotationMatrix.map((row) => {
+            const jenaRow = jenaRotationRows.get(String(row.codes ?? ""));
+            expect(jenaRow, `rotation row for ${String(row.codes)}`).toBeTruthy();
+            return jenaRow?.[columnIndex] ?? 0;
+          });
+          const sign = columnSign(actualColumn, expectedColumn);
+          for (let row = 0; row < expectedColumn.length; row += 1) {
+            expect((actualColumn[row] ?? 0) * sign).toBeCloseTo(expectedColumn[row] ?? 0, 6);
+          }
         }
       });
     }
-
-    it(`matches rENA SVD projections and undirected node placement for ${spec.name}`, () => {
-      const config = spec.dataset.configs[spec.endpointConfigName];
-      expect(config).toBeTruthy();
-      if (!config) return;
-      const set = ena({
-        rows: spec.dataset.input,
-        units: spec.units,
-        conversation: spec.conversation,
-        codes: spec.dataset.codes,
-        metadata: spec.metadata,
-        ...config.options
-      });
-      expectProjectedRowsClose(set.points, config.points, spec.pointIdColumn, ["SVD1", "SVD2"], 6);
-      expectProjectedRowsClose(set.rotation.nodes ?? [], config.nodes, "code", ["SVD1", "SVD2"], 6);
-    });
-
-    it(`matches rENA means rotation for ${spec.name}`, () => {
-      const config = spec.dataset.configs[spec.meanRotationConfigName];
-      expect(config).toBeTruthy();
-      if (!config) return;
-      const set = ena({
-        rows: spec.dataset.input,
-        units: spec.units,
-        conversation: spec.conversation,
-        codes: spec.dataset.codes,
-        metadata: spec.metadata,
-        ...config.options
-      });
-      expect(set.rotation.rotationColumns).toEqual(["MR1", "SVD2"]);
-      expectProjectedRowsClose(set.points, config.points, spec.pointIdColumn, ["MR1", "SVD2"], 6);
-      expectProjectedRowsClose(set.rotation.nodes ?? [], config.nodes, "code", ["MR1", "SVD2"], 6);
-    });
   }
 
   describe("R golden parity", () => {
+    it("fixture carries its generation provenance (rENA/tma/R versions)", () => {
+      expect(fixture.meta?.rENAVersion).toBeTruthy();
+      expect(fixture.meta?.rVersion).toMatch(/^R version/);
+      expect(fixture.meta?.generatedAt).toBeTruthy();
+      expect(fixture.meta?.generatorScript).toBeTruthy();
+    });
+
     it("matches low-level rENA co-occurrence and window fixtures", () => {
       expect(rowsToCoOccurrences(codeMatrix, true)).toEqual(fixture.lowLevel.rowsToCoOccurrencesBinary);
       expect(rowsToCoOccurrences(codeMatrix, false)).toEqual(fixture.lowLevel.rowsToCoOccurrencesWeighted);
@@ -209,15 +254,13 @@ if (!existsSync(fixturePath)) {
       units: ["unit"],
       conversation: ["conv"],
       metadata: ["group"],
-      trajectoryColumns: ["unit", "conv"],
-      endpointConfigName: "movingBinary",
-      pointIdColumn: "unit",
-      meanRotationConfigName: "meanRotation"
+      trajectoryColumns: ["unit", "conv"]
     });
 
     describe("research-shaped fixture", () => {
       it("is present in the generated rENA goldens", () => {
         expect(fixture.research).toBeTruthy();
+        expect(Object.keys(fixture.research?.configs ?? {})).toContain("personSeparateTrajectory");
       });
 
       if (fixture.research) {
@@ -227,10 +270,7 @@ if (!existsSync(fixturePath)) {
           units: ["person"],
           conversation: ["team", "stanza"],
           metadata: ["group", "role"],
-          trajectoryColumns: ["person", "team", "stanza"],
-          endpointConfigName: "personMovingBinary",
-          pointIdColumn: "person",
-          meanRotationConfigName: "personMeanRotation"
+          trajectoryColumns: ["person", "team", "stanza"]
         });
       }
     });
