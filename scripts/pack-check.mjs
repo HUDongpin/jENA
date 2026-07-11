@@ -5,9 +5,17 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const projectDir = join(dirname(fileURLToPath(import.meta.url)), "..");
-// --ignore-scripts keeps the prepare build's output out of the JSON stream;
-// callers (CI, prepublishOnly) run the build before this check.
-const report = JSON.parse(execSync("npm pack --dry-run --json --ignore-scripts", { cwd: projectDir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+// --ignore-scripts keeps the prepare build's output out of the JSON stream on
+// current npm; older npm versions run prepare anyway, so also skip anything
+// printed before the top-level JSON array. Callers (CI, prepublishOnly) run
+// the real build before this check.
+const raw = execSync("npm pack --dry-run --json --ignore-scripts", { cwd: projectDir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+const jsonStart = raw.startsWith("[") ? 0 : raw.indexOf("\n[") + 1;
+if (jsonStart < 0 || raw.indexOf("[", jsonStart) === -1) {
+  console.error("npm pack --dry-run --json produced no JSON output");
+  process.exit(1);
+}
+const report = JSON.parse(raw.slice(jsonStart));
 const files = report[0].files.map((file) => file.path);
 
 const allowed = [
