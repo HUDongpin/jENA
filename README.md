@@ -1,6 +1,6 @@
 # jENA
 
-[![CI](https://github.com/HUDongpin/jENA/actions/workflows/ci.yml/badge.svg)](https://github.com/HUDongpin/jENA/actions/workflows/ci.yml)
+[![CI](https://github.com/HUDongpin/jENA/actions/workflows/ci.yml/badge.svg)](https://github.com/HUDongpin/jENA/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/jena-js.svg)](https://www.npmjs.com/package/jena-js)
 
 `jena-js` is a standalone TypeScript/JavaScript implementation of [Epistemic Network Analysis](https://www.epistemicnetwork.org/) (ENA) for browser and Node runtimes, ported from and verified against the [rENA](https://cran.r-project.org/package=rENA) R package (0.3.1).
 
@@ -9,13 +9,13 @@ The runtime is pure JavaScript with **zero runtime dependencies**. It does not r
 ## Install
 
 ```bash
-npm install github:HUDongpin/jENA
+npm install jena-js
 ```
 
-or from a packed tarball:
+or the development version straight from `main`:
 
 ```bash
-npm install ./jena-js-0.2.0.tgz
+npm install github:HUDongpin/jENA
 ```
 
 **ESM only.** The package ships ES modules and requires Node ≥ 18 or a bundler; `require("jena-js")` is not supported.
