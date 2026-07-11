@@ -81,7 +81,7 @@ Everything in the **verified** tier is tested against golden outputs generated f
 | Rotations: `hena`, `spherical` | 🧪 Experimental | **Not verified against rENA** |
 | Directed node positions | 🧪 Experimental | Throws on this pipeline's undirected models; only usable with external n×n directed adjacency data |
 | Plot adapters, SVG renderer | 🧪 Experimental | Untested convenience helpers |
-| Worker client | 🧪 Experimental | Progress/cancel are coarse (single-run granularity); function-valued `weightBy` cannot cross `postMessage` |
+| Worker client + protocol | ⚠️ Protocol-tested | Versioned protocol v1: chunked progress, cooperative cancel (chunk granularity), crash/timeout/abort rejection — covered by 12 protocol tests on an in-memory channel; not yet exercised in a real browser |
 
 If a rotation or statistic will end up in a publication, stay on the ✅ tier or independently validate your configuration against rENA first.
 

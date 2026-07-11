@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0 - 2026-07-11
+
+### Worker protocol v1 (advisory F-008) — breaking for direct protocol users
+
+- **Progress and cancellation are now real.** The worker drives accumulation through the streaming engine chunk-by-chunk and yields to the event loop between chunks, so `cancel` messages are delivered mid-run and take effect at the next chunk boundary; progress events are monotonic and chunk-granular (accumulation spans 0–0.9, the model stage 0.9–1). Previously the whole run was one synchronous call: progress was exactly 0 then 1, and "cancel" merely suppressed the result.
+- **Cancelled runs now settle.** The worker posts a `cancelled` response and the client rejects with the new `ENAWorkerCancelledError`; before, a cancelled run's promise stayed pending forever. Cancel bookkeeping no longer leaks (the old module-level Set grew unboundedly).
+- **A crashed worker no longer hangs callers**: the client listens for `error`/`messageerror` and rejects every in-flight run. Per-run `timeoutMs` (rejects and cancels the worker-side run), `AbortSignal`, and `chunkSize` options added. Result payloads are shape-validated instead of blindly cast.
+- **Function-valued `weightBy` is rejected at compile time** (`ENAWorkerOptions` narrows it to `"binary" | "sum"`) and with a clear runtime `TypeError` — it previously threw an opaque `DataCloneError` at `postMessage`.
+- Messages are versioned (`{ v: 1, kind: 'run' | 'cancel' | 'progress' | 'result' | 'cancelled' | 'error', id }`). The old `ENAWorkerRequest`/`ENAWorkerCancel`/`ENAWorkerResponse` type shapes are replaced. Runs are serialized per worker; queued runs can be cancelled before they start.
+- New `createENAWorkerHost(scope)` export hosts the production message handler on any scope, making the module importable from Node — the protocol is covered by 12 tests on an in-memory channel with structured-clone semantics.
+- New `extractMakeSetOptions` helper shared by `ena()` and the worker.
+
 ## 0.3.0 - 2026-07-11
 
 ### Verified
