@@ -109,7 +109,7 @@ interface StreamingInternals {
   codes: string[];
   metadata: string[];
   codeColumns: string[];
-  mask?: Matrix;
+  mask?: number[];
   unitFilter?: Set<string>;
   rawRows: Row[];
   rowConnectionRows: Array<{ index: number; row: Row }>;
@@ -198,18 +198,22 @@ function makeUnitRow(row: Row, units: string[]): Row {
   return { ...row, ENA_UNIT: mergeColumns(row, units) };
 }
 
-function applyMaskToCoOccurrence(values: number[], mask: Matrix | undefined): number[] {
-  if (!mask) return values;
-  return values.map((value, index) => {
-    let cursor = 0;
-    for (let target = 1; target < mask.length; target += 1) {
-      for (let source = 0; source < target; source += 1) {
-        if (cursor === index) return value * (mask[source]?.[target] ?? 1);
-        cursor += 1;
-      }
+// Flattens the upper triangle of the code mask once so masking a row is a
+// single elementwise multiply instead of an O(E^2) index scan per row
+// (advisory F-013 hot spot).
+function flattenMask(mask: Matrix): number[] {
+  const flat: number[] = [];
+  for (let target = 1; target < mask.length; target += 1) {
+    for (let source = 0; source < target; source += 1) {
+      flat.push(mask[source]?.[target] ?? 1);
     }
-    return value;
-  });
+  }
+  return flat;
+}
+
+function applyMaskToCoOccurrence(values: number[], flatMask: number[] | undefined): number[] {
+  if (!flatMask) return values;
+  return values.map((value, index) => value * (flatMask[index] ?? 1));
 }
 
 function applyWeight(values: number[], weightBy: WeightBy): number[] {
@@ -671,7 +675,7 @@ function makeInternals(options: StreamingAccumulateOptions): StreamingInternals 
     codes: options.codes,
     metadata,
     codeColumns: stringVectorToUpperTriangle(options.codes),
-    ...(options.mask ? { mask: options.mask } : {}),
+    ...(options.mask ? { mask: flattenMask(options.mask) } : {}),
     ...(options.unitsUsed ? { unitFilter: new Set(options.unitsUsed.map(String)) } : {}),
     rawRows: [],
     rowConnectionRows: [],

@@ -191,13 +191,14 @@ export function scalePlot(model: ENAPlotModel, scaleTo: number | { x?: [number, 
 export function toPlotly(model: ENAPlotModel): { data: ENAPlotlyTrace[]; layout: Record<string, unknown> } {
   const data: ENAPlotlyTrace[] = model.traces.flatMap((trace): ENAPlotlyTrace[] => {
     if (trace.network) {
+      const nodeById = new Map(trace.network.nodes.map((node) => [node.id, node]));
       return trace.network.edges.map((edge) => ({
         type: 'scatter',
         mode: 'lines',
         name: `${trace.name}: ${edge.name}`,
         line: { color: trace.color, width: Math.max(1, Math.abs(edge.weight) * 4) },
-        x: [trace.network?.nodes.find((node) => node.id === edge.source)?.x ?? 0, trace.network?.nodes.find((node) => node.id === edge.target)?.x ?? 0],
-        y: [trace.network?.nodes.find((node) => node.id === edge.source)?.y ?? 0, trace.network?.nodes.find((node) => node.id === edge.target)?.y ?? 0]
+        x: [nodeById.get(edge.source)?.x ?? 0, nodeById.get(edge.target)?.x ?? 0],
+        y: [nodeById.get(edge.source)?.y ?? 0, nodeById.get(edge.target)?.y ?? 0]
       }));
     }
     return [{

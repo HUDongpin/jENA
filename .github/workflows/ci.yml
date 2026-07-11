@@ -25,6 +25,7 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run pack:check
+      - run: node scripts/bench.mjs
       - name: Consumer smoke test (packed tarball)
         run: |
           npm pack

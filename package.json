@@ -66,6 +66,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "bench": "npm run build && node scripts/bench.mjs",
     "pack:check": "node scripts/pack-check.mjs",
     "goldens:r": "Rscript scripts/regen-goldens-rstudio.R .",
     "goldens:stats": "Rscript scripts/generate-stats-goldens.R .",

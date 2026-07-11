@@ -109,13 +109,13 @@ export function designSolve(design: Matrix, response: Matrix, ridge = 0): Matrix
   return transpose(coefficientsByColumn);
 }
 
-export function symmetricJacobiEigen(input: Matrix, maxIterations = Math.max(200, input.length * input.length * 20), tolerance?: number): EigenResult {
+export function symmetricJacobiEigen(input: Matrix, maxSweeps = 100, tolerance?: number): EigenResult {
   const n = input.length;
   const a = cloneMatrix(input);
   const v = identity(n);
 
-  // Stop once the largest off-diagonal is at machine precision relative to
-  // the matrix scale; an absolute cutoff would leave eigenvectors of
+  // Stop once every off-diagonal is at machine precision relative to the
+  // matrix scale; an absolute cutoff would leave eigenvectors of
   // closely-spaced eigenvalues visibly less accurate than LAPACK's.
   let scale = 0;
   for (let i = 0; i < n; i += 1) {
@@ -125,60 +125,59 @@ export function symmetricJacobiEigen(input: Matrix, maxIterations = Math.max(200
   }
   const stopThreshold = tolerance ?? Math.max(Number.MIN_VALUE, scale * 1e-15);
 
-  for (let iteration = 0; iteration < maxIterations; iteration += 1) {
-    let p = 0;
-    let q = 1;
-    let max = 0;
-    for (let i = 0; i < n; i += 1) {
-      for (let j = i + 1; j < n; j += 1) {
-        const value = Math.abs(a[i]?.[j] ?? 0);
-        if (value > max) {
-          max = value;
-          p = i;
-          q = j;
+  // Cyclic-by-row Jacobi: sweep every (p, q) pair in order, rotating only
+  // when the off-diagonal exceeds the threshold. Classical (max-pivot)
+  // Jacobi pays an O(n^2) scan per rotation — ~3 s for a 190x190 matrix;
+  // cyclic sweeps bring that to well under the 1 s budget (advisory F-013)
+  // while converging to the same spectrum.
+  for (let sweep = 0; sweep < maxSweeps && n >= 2; sweep += 1) {
+    let rotatedAny = false;
+    for (let p = 0; p < n - 1; p += 1) {
+      for (let q = p + 1; q < n; q += 1) {
+        const apq = a[p]?.[q] ?? 0;
+        if (Math.abs(apq) <= stopThreshold) continue;
+        rotatedAny = true;
+
+        const app = a[p]?.[p] ?? 0;
+        const aqq = a[q]?.[q] ?? 0;
+        const theta = 0.5 * Math.atan2(2 * apq, aqq - app);
+        const c = Math.cos(theta);
+        const s = Math.sin(theta);
+
+        for (let i = 0; i < n; i += 1) {
+          const matrixRow = a[i];
+          const aip = matrixRow?.[p] ?? 0;
+          const aiq = matrixRow?.[q] ?? 0;
+          if (matrixRow) {
+            matrixRow[p] = c * aip - s * aiq;
+            matrixRow[q] = s * aip + c * aiq;
+          }
+        }
+        const rowP = a[p];
+        const rowQ = a[q];
+        for (let j = 0; j < n; j += 1) {
+          const apj = rowP?.[j] ?? 0;
+          const aqj = rowQ?.[j] ?? 0;
+          if (rowP) rowP[j] = c * apj - s * aqj;
+          if (rowQ) rowQ[j] = s * apj + c * aqj;
+        }
+        if (rowP) rowP[q] = 0;
+        if (rowQ) rowQ[p] = 0;
+
+        // Accumulate the rotation into the two affected eigenvector columns
+        // in place (O(n) per rotation).
+        for (let i = 0; i < n; i += 1) {
+          const vectorRow = v[i];
+          const vip = vectorRow?.[p] ?? 0;
+          const viq = vectorRow?.[q] ?? 0;
+          if (vectorRow) {
+            vectorRow[p] = c * vip - s * viq;
+            vectorRow[q] = s * vip + c * viq;
+          }
         }
       }
     }
-    if (max < stopThreshold || n < 2) break;
-
-    const app = a[p]?.[p] ?? 0;
-    const aqq = a[q]?.[q] ?? 0;
-    const apq = a[p]?.[q] ?? 0;
-    const theta = 0.5 * Math.atan2(2 * apq, aqq - app);
-    const c = Math.cos(theta);
-    const s = Math.sin(theta);
-
-    for (let i = 0; i < n; i += 1) {
-      const matrixRow = a[i];
-      const aip = matrixRow?.[p] ?? 0;
-      const aiq = matrixRow?.[q] ?? 0;
-      if (matrixRow) {
-        matrixRow[p] = c * aip - s * aiq;
-        matrixRow[q] = s * aip + c * aiq;
-      }
-    }
-    const rowP = a[p];
-    const rowQ = a[q];
-    for (let j = 0; j < n; j += 1) {
-      const apj = rowP?.[j] ?? 0;
-      const aqj = rowQ?.[j] ?? 0;
-      if (rowP) rowP[j] = c * apj - s * aqj;
-      if (rowQ) rowQ[j] = s * apj + c * aqj;
-    }
-    if (rowP) rowP[q] = 0;
-    if (rowQ) rowQ[p] = 0;
-
-    // Accumulate the rotation into the two affected eigenvector columns in
-    // place (O(n)) instead of a full n x n matrix multiply per rotation.
-    for (let i = 0; i < n; i += 1) {
-      const vectorRow = v[i];
-      const vip = vectorRow?.[p] ?? 0;
-      const viq = vectorRow?.[q] ?? 0;
-      if (vectorRow) {
-        vectorRow[p] = c * vip - s * viq;
-        vectorRow[q] = s * vip + c * viq;
-      }
-    }
+    if (!rotatedAny) break;
   }
 
   const pairs = Array.from({ length: n }, (_, i) => ({ value: a[i]?.[i] ?? 0, index: i }))
