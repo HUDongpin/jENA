@@ -24,10 +24,17 @@ npm ci                          # clean install from the lockfile
 ```bash
 npm run lint && npm run typecheck && npm test
 npm run build && npm run pack:check     # tarball = dist + docs only
+npm ls --omit=dev --all                 # root package only; no runtime tree
+npm audit --omit=dev                    # zero production vulnerabilities
 node scripts/bench.mjs                  # budgets (Apple Silicon baselines)
 npm run test:browser                    # real-Chromium worker + SVG tests
 npm publish --dry-run                   # eyeball name/version/files/size
 ```
+
+`pack:check` also rejects runtime, optional, peer, bundled, and lockfile-root
+dependencies. This is a release invariant: `jena-js` must never depend on
+itself, and the documented zero-runtime-dependency contract must match the
+actual registry manifest.
 
 Commit (`release: vX.Y.Z`), push, and wait for CI (Node 18/20/22 + Chromium)
 to go green on the release commit.

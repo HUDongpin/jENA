@@ -1,6 +1,6 @@
 {
   "name": "jena-js",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Standalone TypeScript/JavaScript library for Epistemic Network Analysis, ported from rENA for browser and Node runtimes.",
   "type": "module",
   "license": "GPL-3.0-only",
@@ -71,7 +71,7 @@
   "scripts": {
     "build": "tsup src/index.ts src/core/index.ts src/rotation/index.ts src/experimental.ts src/plot/index.ts src/browser/index.ts src/browser/worker.ts --format esm --dts --sourcemap --clean",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build && npm run pack:check",
+    "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run test:pack-contract && npm run build && npm run pack:check",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:browser": "vitest run --config vitest.browser.config.ts",
@@ -79,6 +79,7 @@
     "lint": "eslint .",
     "bench": "npm run build && node scripts/bench.mjs",
     "pack:check": "node scripts/pack-check.mjs",
+    "test:pack-contract": "node --test scripts/package-contract.test.mjs",
     "goldens:r": "Rscript scripts/regen-goldens-rstudio.R .",
     "goldens:stats": "Rscript scripts/generate-stats-goldens.R .",
     "goldens:rotations": "Rscript scripts/generate-rotation-goldens.R .",
@@ -90,14 +91,11 @@
     "@types/node": "^22.15.0",
     "@typescript-eslint/eslint-plugin": "^8.32.0",
     "@typescript-eslint/parser": "^8.32.0",
-    "@vitest/browser": "^3.2.6",
+    "@vitest/browser": "^3.2.7",
     "eslint": "^9.26.0",
     "playwright": "^1.61.1",
     "tsup": "^8.4.0",
     "typescript": "^5.8.3",
-    "vitest": "^3.1.3"
-  },
-  "dependencies": {
-    "jena-js": "^0.6.0"
+    "vitest": "^3.2.7"
   }
 }

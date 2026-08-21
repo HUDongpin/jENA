@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
+import { assertZeroRuntimeDependencyContract } from "./package-contract.mjs";
+
 const projectDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 // --ignore-scripts keeps the prepare build's output out of the JSON stream on
 // current npm; older npm versions run prepare anyway, so also skip anything
@@ -73,4 +75,14 @@ if (!Array.isArray(pkg.sideEffects) || !pkg.sideEffects.includes("./dist/browser
   process.exit(1);
 }
 
-console.log("pack-check OK: only dist + docs ship, all entry points present, worker side effect declared.");
+const lock = JSON.parse(readFileSync(join(projectDir, "package-lock.json"), "utf8"));
+try {
+  assertZeroRuntimeDependencyContract(pkg, lock);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+
+console.log(
+  "pack-check OK: only dist + docs ship, all entry points present, worker side effect declared, zero runtime dependencies.",
+);

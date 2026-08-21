@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.3 - 2026-08-21
+
+- Removed the accidental `jena-js@^0.6.0` self-dependency from both the
+  published manifest and the lockfile. The package once again matches its
+  documented zero-runtime-dependency contract; no numerical, API, or runtime
+  implementation changed.
+- Hardened `pack-check` so a release fails closed if `package.json` or the
+  lockfile root declares any runtime, optional, peer, or bundled dependency.
+  This makes the packaging defect reproducible in CI instead of relying on a
+  manual manifest inspection.
+- Updated the Vitest browser toolchain to 3.2.7 and refreshed compatible
+  transitive development dependencies, removing the known critical and high
+  audit findings from the CI test stack. These tools are not shipped in the
+  package tarball.
+- Restricted the CI token to read-only repository contents, pinned the GitHub
+  Actions used by the workflow to immutable commits, and added production-zero
+  plus high/critical development audit gates for public-repository CI.
+
 ## 0.6.2 - 2026-07-12
 
 - `package.json` `sideEffects` is now `["./dist/browser/worker.js"]` instead
