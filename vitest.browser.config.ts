@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { playwright } from "@vitest/browser-playwright";
 
 // Real-browser harness (advisory F-014): runs the worker round-trip and the
 // SVG renderer in actual Chromium via Playwright.
@@ -8,7 +9,7 @@ export default defineConfig({
     browser: {
       enabled: true,
       headless: true,
-      provider: "playwright",
+      provider: playwright(),
       instances: [{ browser: "chromium" }]
     }
   }

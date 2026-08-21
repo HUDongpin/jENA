@@ -73,4 +73,9 @@ if (!Array.isArray(pkg.sideEffects) || !pkg.sideEffects.includes("./dist/browser
   process.exit(1);
 }
 
+if (pkg.dependencies !== undefined && Object.keys(pkg.dependencies).length > 0) {
+  console.error("jena-js must publish with zero runtime dependencies.");
+  process.exit(1);
+}
+
 console.log("pack-check OK: only dist + docs ship, all entry points present, worker side effect declared.");
