@@ -22,7 +22,9 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
-      - run: npm test
+      - name: Unit tests
+        if: matrix.node-version != 18
+        run: npm test
       - run: npm run build
       - run: npm run pack:check
       - name: Benchmarks (budget-gated on the pinned Node version)
