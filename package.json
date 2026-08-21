@@ -1,6 +1,6 @@
 {
   "name": "jena-js",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Standalone TypeScript/JavaScript library for Epistemic Network Analysis, ported from rENA for browser and Node runtimes.",
   "type": "module",
   "license": "GPL-3.0-only",
@@ -90,14 +90,13 @@
     "@types/node": "^22.15.0",
     "@typescript-eslint/eslint-plugin": "^8.32.0",
     "@typescript-eslint/parser": "^8.32.0",
-    "@vitest/browser": "^3.2.6",
+    "@vitest/browser": "^4.1.11",
+    "@vitest/browser-playwright": "^4.1.11",
+    "esbuild": "0.28.2",
     "eslint": "^9.26.0",
     "playwright": "^1.61.1",
     "tsup": "^8.4.0",
     "typescript": "^5.8.3",
-    "vitest": "^3.1.3"
-  },
-  "dependencies": {
-    "jena-js": "^0.6.0"
+    "vitest": "^4.1.11"
   }
 }

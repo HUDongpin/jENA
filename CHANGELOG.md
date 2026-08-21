@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.3 - 2026-08-21
+
+- Removed the accidental `jena-js@^0.6.0` runtime self-dependency. The package
+  again has zero runtime npm dependencies, matching its documented runtime
+  boundary. No runtime or numerical source changed.
+- Packaging validation now rejects any future runtime dependency, including a
+  self-dependency, before publication.
+
 ## 0.6.2 - 2026-07-12
 
 - `package.json` `sideEffects` is now `["./dist/browser/worker.js"]` instead

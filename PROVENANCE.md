@@ -53,6 +53,10 @@ The package runtime is pure JavaScript:
 
 R is used only for development-time tasks: regenerating golden fixtures (`npm run goldens:r`, `npm run goldens:stats`) and comparing behavior to rENA in tests.
 
+Version 0.6.3 restores this boundary at the package-manifest level by removing
+the accidental 0.6.2 self-dependency. The runtime and numerical source are
+unchanged from commit `2f63db4c6ccf5684afc8437ae81ed1a3ccd0c1a3`.
+
 ## License
 
 Distributed under **GPL-3.0-only**. rENA is the upstream GPL-3 work this package translates; the GPL posture (license, attribution, and corresponding source via this repository) is preserved. See the Upstream NOTICE above.
