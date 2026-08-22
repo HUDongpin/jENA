@@ -171,6 +171,19 @@ function validateExplicitStandardENADataSchema(enadata: ENAData): void {
   if (!Array.isArray(enadata.connectionMatrix)) {
     throw new Error('Explicit standard ENAData connectionMatrix must be an array of undirected rows.');
   }
+  if (!Array.isArray(enadata.connectionCounts)) {
+    throw new Error('Explicit standard ENAData connectionCounts must be an array of undirected count rows.');
+  }
+  if (!Array.isArray(enadata.unitLabels)) {
+    throw new Error('Explicit standard ENAData unitLabels must be an array.');
+  }
+  if (enadata.connectionMatrix.length !== enadata.connectionCounts.length ||
+    enadata.connectionMatrix.length !== enadata.unitLabels.length) {
+    throw new Error(
+      `Explicit standard ENAData row counts must agree: connectionMatrix has ${enadata.connectionMatrix.length} rows, ` +
+      `connectionCounts has ${enadata.connectionCounts.length}, and unitLabels has ${enadata.unitLabels.length}.`
+    );
+  }
   for (let rowIndex = 0; rowIndex < enadata.connectionMatrix.length; rowIndex += 1) {
     const row = enadata.connectionMatrix[rowIndex];
     if (!Array.isArray(row) || row.length !== expectedWidth) {
@@ -178,6 +191,42 @@ function validateExplicitStandardENADataSchema(enadata: ENAData): void {
         `Explicit standard ENAData connectionMatrix row ${rowIndex} must contain ${expectedWidth} upper-triangle cells; ` +
         `got ${Array.isArray(row) ? row.length : typeof row}.`
       );
+    }
+    for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
+      const value = row[columnIndex];
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error(
+          `Explicit standard ENAData connectionMatrix[${rowIndex}][${columnIndex}] must be a finite number; ` +
+          `got ${String(value)}.`
+        );
+      }
+    }
+  }
+  for (let rowIndex = 0; rowIndex < enadata.connectionCounts.length; rowIndex += 1) {
+    const countRow = enadata.connectionCounts[rowIndex];
+    if (!countRow || typeof countRow !== 'object' || Array.isArray(countRow)) {
+      throw new Error(`Explicit standard ENAData connectionCounts row ${rowIndex} must be an object.`);
+    }
+    for (let columnIndex = 0; columnIndex < expectedKey.length; columnIndex += 1) {
+      const column = expectedKey[columnIndex]!.name;
+      if (!Object.prototype.hasOwnProperty.call(countRow, column)) {
+        throw new Error(
+          `Explicit standard ENAData connectionCounts row ${rowIndex} is missing upper-triangle column "${column}".`
+        );
+      }
+      const countValue = countRow[column];
+      if (typeof countValue !== 'number' || !Number.isFinite(countValue)) {
+        throw new Error(
+          `Explicit standard ENAData connectionCounts[${rowIndex}]["${column}"] must be a finite number; ` +
+          `got ${String(countValue)}.`
+        );
+      }
+      if (countValue !== enadata.connectionMatrix[rowIndex]?.[columnIndex]) {
+        throw new Error(
+          `Explicit standard ENAData connectionCounts[${rowIndex}]["${column}"] does not match ` +
+          `connectionMatrix[${rowIndex}][${columnIndex}].`
+        );
+      }
     }
   }
 }

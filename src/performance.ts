@@ -337,7 +337,9 @@ interface MovingConversationState {
   noForwardRunningSum: number[];
   orderedRunningSum: number[];
   orderedPreviousRowIndex: number | null;
-  orderedHistory: StreamRowEntry[];
+  orderedHistory: Array<StreamRowEntry | undefined>;
+  orderedHistoryHead: number;
+  orderedHistorySize: number;
 }
 
 interface ConversationAggregate {
@@ -671,7 +673,7 @@ function makeOrderedNoForwardConnections(
     ? Math.max(0, internals.windowSizeBack - 1)
     : Number.POSITIVE_INFINITY;
   const priorRowCount = Number.isFinite(priorLimit)
-    ? state.orderedHistory.length
+    ? state.orderedHistorySize
     : state.rowsSeen - 1;
   const connections = orderedConnections(state.orderedRunningSum, entry.codeValues);
 
@@ -686,10 +688,18 @@ function makeOrderedNoForwardConnections(
   state.orderedPreviousRowIndex = entry.globalIndex;
   state.orderedRunningSum = addVectors(state.orderedRunningSum, entry.codeValues);
   if (Number.isFinite(priorLimit)) {
-    state.orderedHistory.push(entry);
-    while (state.orderedHistory.length > priorLimit) {
-      const removed = state.orderedHistory.shift();
-      if (removed) state.orderedRunningSum = subtractVectors(state.orderedRunningSum, removed.codeValues);
+    if (priorLimit === 0) {
+      state.orderedRunningSum = subtractVectors(state.orderedRunningSum, entry.codeValues);
+    } else if (state.orderedHistorySize < priorLimit) {
+      state.orderedHistory.push(entry);
+      state.orderedHistorySize += 1;
+    } else {
+      const removed = state.orderedHistory[state.orderedHistoryHead];
+      if (removed) {
+        state.orderedRunningSum = subtractVectors(state.orderedRunningSum, removed.codeValues);
+      }
+      state.orderedHistory[state.orderedHistoryHead] = entry;
+      state.orderedHistoryHead = (state.orderedHistoryHead + 1) % priorLimit;
     }
   }
   return connections;
@@ -776,7 +786,9 @@ function getMovingConversation(internals: StreamingInternals, identityKey: strin
       noForwardRunningSum: zeros(internals.codes.length),
       orderedRunningSum: zeros(internals.codes.length),
       orderedPreviousRowIndex: null,
-      orderedHistory: []
+      orderedHistory: [],
+      orderedHistoryHead: 0,
+      orderedHistorySize: 0
     };
     internals.movingConversations.set(identityKey, state);
   }
@@ -1010,7 +1022,7 @@ function finishInternals(internals: StreamingInternals): ENAData {
 function activeBufferedRows(internals: StreamingInternals): number {
   let total = 0;
   for (const state of internals.movingConversations.values()) {
-    total += state.buffer.length + state.noForwardHistory.length + state.orderedHistory.length;
+    total += state.buffer.length + state.noForwardHistory.length + state.orderedHistorySize;
   }
   return total;
 }
@@ -1173,6 +1185,9 @@ function makeAccumulationStreamController(
       }
       state.isFinished = true;
       try {
+        if (state.rowsSeen === 0) {
+          throw new Error('rows is empty; provide at least one coded data row.');
+        }
         const result = finishInternals(activeInternals);
         updateProgress(state, activeInternals, expectedRows);
         state.progress = 1;

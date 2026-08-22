@@ -20,6 +20,22 @@ function orderedData(): ENAData {
   });
 }
 
+function explicitStandardData(): ENAData {
+  const data = accumulateData({
+    rows,
+    units: ["unit"],
+    conversation: ["horizon"],
+    codes: ["A", "B"],
+    networkType: "standard",
+    windowSizeBack: 2
+  });
+  return {
+    ...data,
+    networkType: "standard",
+    functionParams: { ...data.functionParams, networkType: "standard" }
+  };
+}
+
 describe("makeSet ENAData network contract", () => {
   it("rejects an unknown runtime data networkType before modeling", () => {
     const tampered = { ...orderedData(), networkType: "mystery" as never };
@@ -203,20 +219,103 @@ describe("makeSet ENAData network contract", () => {
   });
 
   it("accepts an explicitly standard upper-triangle schema", () => {
-    const standard = accumulateData({
-      rows,
-      units: ["unit"],
-      conversation: ["horizon"],
-      codes: ["A", "B"],
-      networkType: "standard",
-      windowSizeBack: 2
-    });
-    const explicitStandard: ENAData = {
-      ...standard,
-      networkType: "standard",
-      functionParams: { ...standard.functionParams, networkType: "standard" }
+    expect(() => makeSet(explicitStandardData())).not.toThrow();
+  });
+
+  it("rejects explicit standard row-count disagreement before matrix modeling", () => {
+    const data = explicitStandardData();
+    const tampered: ENAData = {
+      ...data,
+      connectionCounts: data.connectionCounts.slice(0, 1)
     };
-    expect(() => makeSet(explicitStandard)).not.toThrow();
+
+    expect(() => makeSet(tampered)).toThrowError(
+      'Explicit standard ENAData row counts must agree: connectionMatrix has 2 rows, connectionCounts has 1, and unitLabels has 2.'
+    );
+  });
+
+  it.each([
+    {
+      field: "connectionCounts",
+      patch: { connectionCounts: null as never },
+      message: "Explicit standard ENAData connectionCounts must be an array of undirected count rows."
+    },
+    {
+      field: "unitLabels",
+      patch: { unitLabels: null as never },
+      message: "Explicit standard ENAData unitLabels must be an array."
+    }
+  ])("rejects non-array explicit standard $field", ({ patch, message }) => {
+    expect(() => makeSet({ ...explicitStandardData(), ...patch })).toThrowError(message);
+  });
+
+  it("rejects a non-finite explicit standard connectionMatrix cell", () => {
+    const data = explicitStandardData();
+    const tampered: ENAData = {
+      ...data,
+      connectionMatrix: data.connectionMatrix.map((row, rowIndex) =>
+        row.map((value, columnIndex) => rowIndex === 0 && columnIndex === 0 ? Number.NaN : value)
+      )
+    };
+
+    expect(() => makeSet(tampered)).toThrowError(
+      'Explicit standard ENAData connectionMatrix[0][0] must be a finite number; got NaN.'
+    );
+  });
+
+  it("rejects an explicit standard connectionCounts row missing an edge column", () => {
+    const data = explicitStandardData();
+    const column = data.codeColumns[0]!;
+    const firstRow = Object.fromEntries(
+      Object.entries(data.connectionCounts[0]!).filter(([key]) => key !== column)
+    ) as Row;
+    const tampered: ENAData = {
+      ...data,
+      connectionCounts: [firstRow, ...data.connectionCounts.slice(1)]
+    };
+
+    expect(() => makeSet(tampered)).toThrowError(
+      `Explicit standard ENAData connectionCounts row 0 is missing upper-triangle column "${column}".`
+    );
+  });
+
+  it("rejects a non-finite explicit standard connectionCounts cell", () => {
+    const data = explicitStandardData();
+    const column = data.codeColumns[0]!;
+    const tampered: ENAData = {
+      ...data,
+      connectionCounts: [
+        { ...data.connectionCounts[0]!, [column]: Number.POSITIVE_INFINITY },
+        ...data.connectionCounts.slice(1)
+      ]
+    };
+
+    expect(() => makeSet(tampered)).toThrowError(
+      `Explicit standard ENAData connectionCounts[0]["${column}"] must be a finite number; got Infinity.`
+    );
+  });
+
+  it("rejects disagreement between explicit standard count rows and the numeric matrix", () => {
+    const data = explicitStandardData();
+    const column = data.codeColumns[0]!;
+    const tampered: ENAData = {
+      ...data,
+      connectionCounts: [
+        { ...data.connectionCounts[0]!, [column]: Number(data.connectionCounts[0]?.[column] ?? 0) + 1 },
+        ...data.connectionCounts.slice(1)
+      ]
+    };
+
+    expect(() => makeSet(tampered)).toThrowError(
+      `Explicit standard ENAData connectionCounts[0]["${column}"] does not match connectionMatrix[0][0].`
+    );
+  });
+
+  it("rejects the paired ground-response solver for ordered endpoint data", () => {
+    expect(() => makeSet(orderedData(), { nodePositionMethod: "directed-ground-response" }))
+      .toThrowError(
+        'Ordered ENAData supports nodePositionMethod "directed"; "directed-ground-response" requires explicitly paired ground/response rows.'
+      );
   });
 
   it("projectIn inherits the same runtime data validation", () => {

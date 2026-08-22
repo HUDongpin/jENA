@@ -144,15 +144,28 @@ export function createENAWorkerHost(scope: ENAWorkerScope): void {
     const message = event.data;
     if (!message || message.v !== ENA_WORKER_PROTOCOL_VERSION || typeof message.id !== 'string') return;
     if (message.kind === 'cancel') {
-      // Marks the queued or active run; unknown/settled ids are ignored, so
-      // nothing accumulates (the old module-level Set leaked forever).
       const current = active;
-      if (current && current.id === message.id) current.cancelled = true;
-      const queued = queue.find((run) => run.id === message.id);
-      if (queued) queued.cancelled = true;
+      if (current && current.id === message.id) {
+        current.cancelled = true;
+        return;
+      }
+      const queuedIndex = queue.findIndex((run) => run.id === message.id);
+      if (queuedIndex >= 0) {
+        queue.splice(queuedIndex, 1);
+        post({ v: 1, kind: 'cancelled', id: message.id });
+      }
       return;
     }
     if (message.kind === 'run') {
+      if (active?.id === message.id || queue.some((run) => run.id === message.id)) {
+        post({
+          v: 1,
+          kind: 'error',
+          id: message.id,
+          message: `ENA worker request id "${message.id}" is already active or queued.`
+        });
+        return;
+      }
       const rawChunk = message.chunkSize;
       const chunkSize = rawChunk !== undefined && Number.isInteger(rawChunk) && rawChunk > 0 ? rawChunk : DEFAULT_CHUNK_SIZE;
       queue.push({ id: message.id, options: message.options, chunkSize, cancelled: false });

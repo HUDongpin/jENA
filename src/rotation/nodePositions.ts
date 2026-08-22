@@ -89,12 +89,65 @@ function directedNodeCount(adjacencyLength: number, method: string): number {
   return numNodes;
 }
 
+function validateDirectedAdjacencyShape(lineWeights: Matrix, method: string): number {
+  const firstRow = lineWeights[0];
+  if (!Array.isArray(firstRow)) {
+    throw new Error(`${method} lineWeights row 0 must be an array.`);
+  }
+  const adjacencyLength = firstRow.length;
+  const numNodes = directedNodeCount(adjacencyLength, method);
+  for (let rowIndex = 0; rowIndex < lineWeights.length; rowIndex += 1) {
+    const row = lineWeights[rowIndex];
+    if (!Array.isArray(row) || row.length !== adjacencyLength) {
+      throw new Error(
+        `${method} lineWeights row ${rowIndex} must contain ${adjacencyLength} directed adjacency cells matching row 0; ` +
+        `got ${Array.isArray(row) ? row.length : typeof row}.`
+      );
+    }
+    for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
+      const value = row[columnIndex];
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error(
+          `${method} lineWeights[${rowIndex}][${columnIndex}] must be a finite number; got ${String(value)}.`
+        );
+      }
+    }
+  }
+  return numNodes;
+}
+
+function validateDirectedPoints(points: Matrix, method: string): void {
+  const firstRow = points[0];
+  if (!Array.isArray(firstRow)) {
+    throw new Error(`${method} points row 0 must be an array.`);
+  }
+  const dimensions = firstRow.length;
+  for (let rowIndex = 0; rowIndex < points.length; rowIndex += 1) {
+    const row = points[rowIndex];
+    if (!Array.isArray(row) || row.length !== dimensions) {
+      throw new Error(
+        `${method} points row ${rowIndex} must contain ${dimensions} dimensions matching row 0; ` +
+        `got ${Array.isArray(row) ? row.length : typeof row}.`
+      );
+    }
+    for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
+      const value = row[columnIndex];
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error(
+          `${method} points[${rowIndex}][${columnIndex}] must be a finite number; got ${String(value)}.`
+        );
+      }
+    }
+  }
+}
+
 export function directedNodePositions(lineWeights: Matrix, points: Matrix): NodePositionResult {
   if (lineWeights.length !== points.length) {
     throw new Error('lineWeights and points must have the same number of rows.');
   }
   if (points.length === 0) return { nodes: [], centroids: [], weights: [] };
-  const numNodes = directedNodeCount(lineWeights[0]?.length ?? 0, 'directedNodePositions');
+  const numNodes = validateDirectedAdjacencyShape(lineWeights, 'directedNodePositions');
+  validateDirectedPoints(points, 'directedNodePositions');
   return solveNodePositionsFromWeights(directedWeightsFromLineWeights(lineWeights, numNodes), points);
 }
 
@@ -102,8 +155,15 @@ export function directedNodePositionsWithGroundResponseAdded(lineWeights: Matrix
   if (lineWeights.length !== points.length) {
     throw new Error('lineWeights and points must have the same number of rows.');
   }
+  if (lineWeights.length % 2 !== 0) {
+    throw new Error(
+      'directedNodePositionsWithGroundResponseAdded requires an even number of paired ground/response rows; ' +
+      `got ${lineWeights.length}.`
+    );
+  }
   if (points.length === 0) return { nodes: [], centroids: [], weights: [] };
-  const numNodes = directedNodeCount(lineWeights[0]?.length ?? 0, 'directedNodePositionsWithGroundResponseAdded');
+  const numNodes = validateDirectedAdjacencyShape(lineWeights, 'directedNodePositionsWithGroundResponseAdded');
+  validateDirectedPoints(points, 'directedNodePositionsWithGroundResponseAdded');
   const weights = directedWeightsFromLineWeights(lineWeights, numNodes);
   const addedWeights: Matrix = [];
   const addedPoints: Matrix = [];

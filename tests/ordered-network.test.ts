@@ -698,6 +698,52 @@ describe("ordered network streaming and downstream modeling", () => {
     expect(edgeValue(data.connectionCounts[0]!, data, "A", "A")).toBe(rowCount * (rowCount - 1) / 2);
   });
 
+  it("keeps a large finite ordered window bounded without shifting history rows", () => {
+    const rowCount = 5_000;
+    const windowSizeBack = 257;
+    const priorLimit = windowSizeBack - 1;
+    const longRows: Row[] = Array.from({ length: rowCount }, () => ({
+      unit: "u1",
+      horizon: "finite",
+      A: 1,
+      B: 0
+    }));
+    const originalShift = Array.prototype.shift;
+    let historyShiftCount = 0;
+    Array.prototype.shift = function countedShift<T>(this: T[]): T | undefined {
+      historyShiftCount += 1;
+      return originalShift.call(this);
+    };
+
+    try {
+      const stream = createAccumulationStream({
+        units: ["unit"],
+        conversation: ["horizon"],
+        codes,
+        networkType: "ordered",
+        windowSizeBack,
+        materialization: "model",
+        expectedRows: rowCount
+      });
+      for (let index = 0; index < rowCount; index += 100) {
+        stream.push(longRows.slice(index, index + 100));
+      }
+      const data = stream.finish();
+      const expectedSelfMass = priorLimit * (priorLimit + 1) / 2 +
+        (rowCount - priorLimit - 1) * priorLimit;
+
+      expect(historyShiftCount).toBe(0);
+      expect(stream.state.activeBufferedRowsPeak).toBe(priorLimit);
+      expect(data.rowWindowProvenance?.at(-1)).toEqual(expect.objectContaining({
+        responseRowIndex: rowCount - 1,
+        priorRowCount: priorLimit
+      }));
+      expect(edgeValue(data.connectionCounts[0]!, data, "A", "A")).toBe(expectedSelfMass);
+    } finally {
+      Array.prototype.shift = originalShift;
+    }
+  });
+
   it("makes an ordered set with directed node positions by default", () => {
     const implicit = ena(options);
     const explicit = ena({ ...options, nodePositionMethod: "directed" });

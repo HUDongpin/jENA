@@ -12,6 +12,7 @@ import type { Row } from "../src/index.js";
 // the same event-loop timing as a real worker).
 function createWorkerPair() {
   const workerListeners: Array<(event: ENAWorkerMessageEvent<ENAWorkerRequest>) => void> = [];
+  const responses: ENAWorkerResponse[] = [];
   const clientListeners = {
     message: [] as Array<(event: ENAWorkerMessageEvent<ENAWorkerResponse>) => void>,
     error: [] as Array<(event: unknown) => void>,
@@ -24,6 +25,7 @@ function createWorkerPair() {
     },
     postMessage(message) {
       const clone = structuredClone(message);
+      responses.push(clone);
       setTimeout(() => {
         for (const listener of clientListeners.message) listener({ data: clone });
       }, 0);
@@ -51,6 +53,7 @@ function createWorkerPair() {
 
   return {
     workerLike,
+    responses,
     emitWorkerError(message: string) {
       for (const listener of clientListeners.error) listener({ message });
     },
@@ -131,13 +134,14 @@ describe("worker protocol v1 (advisory F-008)", () => {
     client.terminate();
   });
 
-  it("cancelling a queued run settles it without executing", async () => {
-    const { workerLike } = createWorkerPair();
+  it("cancelling a queued run removes and settles it before the active run completes", async () => {
+    const { workerLike, responses } = createWorkerPair();
     const client = createENAWorkerClient(workerLike);
-    const first = client.start({ ...baseOptions, rows: makeRows(400) }, { chunkSize: 25 });
+    const first = client.start({ ...baseOptions, rows: makeRows(100) }, { chunkSize: 1 });
     const second = client.start({ ...baseOptions, rows: makeRows(400) }, { chunkSize: 25 });
     second.cancel();
     await expect(second.promise).rejects.toBeInstanceOf(ENAWorkerCancelledError);
+    expect(responses.some((response) => response.id === first.id && response.kind === "result")).toBe(false);
     await expect(first.promise).resolves.toBeTruthy();
     client.terminate();
   });
@@ -151,6 +155,78 @@ describe("worker protocol v1 (advisory F-008)", () => {
     expect(smallSet.points).toEqual(ena({ ...baseOptions, rows: makeRows(24) }).points);
     expect(largeSet.points).toEqual(ena({ ...baseOptions, rows: makeRows(120) }).points);
     client.terminate();
+  });
+
+  it("rejects a duplicate run id while the original request is active", async () => {
+    const { workerLike, responses } = createWorkerPair();
+    const id = "duplicate-run";
+    const first: ENAWorkerRequest = {
+      v: 1,
+      kind: "run",
+      id,
+      options: { ...baseOptions, rows: makeRows(20) },
+      chunkSize: 1
+    };
+    const duplicate: ENAWorkerRequest = {
+      v: 1,
+      kind: "run",
+      id,
+      options: { ...baseOptions, rows: makeRows(2) }
+    };
+
+    try {
+      workerLike.postMessage(first);
+      workerLike.postMessage(duplicate);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(responses).toContainEqual({
+        v: 1,
+        kind: "error",
+        id,
+        message: 'ENA worker request id "duplicate-run" is already active or queued.'
+      });
+    } finally {
+      workerLike.postMessage({ v: 1, kind: "cancel", id });
+    }
+  });
+
+  it("rejects a duplicate run id already waiting in the queue", async () => {
+    const { workerLike, responses } = createWorkerPair();
+    const activeId = "active-run";
+    const queuedId = "queued-run";
+
+    try {
+      workerLike.postMessage({
+        v: 1,
+        kind: "run",
+        id: activeId,
+        options: { ...baseOptions, rows: makeRows(20) },
+        chunkSize: 1
+      });
+      workerLike.postMessage({
+        v: 1,
+        kind: "run",
+        id: queuedId,
+        options: { ...baseOptions, rows: makeRows(2) }
+      });
+      workerLike.postMessage({
+        v: 1,
+        kind: "run",
+        id: queuedId,
+        options: { ...baseOptions, rows: makeRows(3) }
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(responses).toContainEqual({
+        v: 1,
+        kind: "error",
+        id: queuedId,
+        message: 'ENA worker request id "queued-run" is already active or queued.'
+      });
+    } finally {
+      workerLike.postMessage({ v: 1, kind: "cancel", id: queuedId });
+      workerLike.postMessage({ v: 1, kind: "cancel", id: activeId });
+    }
   });
 
   it("rejects every pending run when the worker crashes", async () => {

@@ -139,6 +139,12 @@ function makeNodePositions(
       'Omit nodePositionMethod to use "directed".'
     );
   }
+  if (networkType === 'ordered' && method === 'directed-ground-response') {
+    throw new Error(
+      'Ordered ENAData supports nodePositionMethod "directed"; ' +
+      '"directed-ground-response" requires explicitly paired ground/response rows.'
+    );
+  }
   if (method !== 'undirected') {
     // Directed solvers require full n*n adjacency vectors and must never be
     // applied to standard upper-triangle ENA data (advisory F-003).

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { accumulateDataChunked, createAccumulationStream } from "../src/index.js";
-import type { Row } from "../src/index.js";
+import {
+  accumulateDataChunked,
+  accumulateDataStreaming,
+  createAccumulationStream
+} from "../src/index.js";
+import type { NetworkType, Row } from "../src/index.js";
 
 const rows: Row[] = [
   { unit: "u1", horizon: "h1", A: 1, B: 0 },
@@ -8,6 +12,59 @@ const rows: Row[] = [
 ];
 
 describe("accumulation stream disposal", () => {
+  it("rejects an empty standard stream and disposes it", () => {
+    const stream = createAccumulationStream({
+      units: ["unit"],
+      conversation: ["horizon"],
+      codes: ["A", "B"]
+    });
+
+    expect(() => stream.finish())
+      .toThrow("rows is empty; provide at least one coded data row.");
+    expect(stream.state).toMatchObject({
+      isFinished: true,
+      isDisposed: true,
+      activeConversations: 0,
+      activeBufferedRows: 0
+    });
+  });
+
+  it("rejects an empty ordered stream and disposes it", () => {
+    const stream = createAccumulationStream({
+      units: ["unit"],
+      conversation: ["horizon"],
+      codes: ["A", "B"],
+      networkType: "ordered"
+    });
+
+    expect(() => stream.finish())
+      .toThrow("rows is empty; provide at least one coded data row.");
+    expect(stream.state).toMatchObject({
+      isFinished: true,
+      isDisposed: true,
+      activeConversations: 0,
+      activeBufferedRows: 0
+    });
+  });
+
+  it.each<NetworkType>(["standard", "ordered"])(
+    "rejects empty %s rows through both accumulation wrappers",
+    (networkType) => {
+      const options = {
+        rows: [],
+        units: ["unit"],
+        conversation: ["horizon"],
+        codes: ["A", "B"],
+        networkType
+      };
+
+      expect(() => accumulateDataStreaming(options))
+        .toThrow("rows is empty; provide at least one coded data row.");
+      expect(() => accumulateDataChunked({ ...options, chunkSize: 1 }))
+        .toThrow("rows is empty; provide at least one coded data row.");
+    }
+  );
+
   it("disposes after a successful finish without clearing the returned result", () => {
     const stream = createAccumulationStream({
       units: ["unit"],
