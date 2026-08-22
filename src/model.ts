@@ -11,11 +11,13 @@ import type {
   ENASet,
   MakeSetOptions,
   Matrix,
+  NetworkType,
   Row,
   RotationSet
 } from './types.js';
 import { centerData, meanColumns, multiplyMatrices, sphereNorm, varianceColumns } from './core/matrix.js';
-import { validateMakeSetOptions } from './core/validate.js';
+import { assertOrderedSvdBudget } from './core/orderedLimits.js';
+import { validateENADataNetworkContract, validateMakeSetOptions } from './core/validate.js';
 import { svdRotation } from './rotation/svd.js';
 import {
   centroidsAsRows,
@@ -124,12 +126,62 @@ function makeRotation(enadata: ENAData, pointsForProjection: Matrix, options: Ma
   }
 }
 
-function makeNodePositions(lineWeights: Matrix, points: Matrix, codeCount: number, options: MakeSetOptions): NodePositionResult {
-  const method = options.nodePositionMethod ?? 'undirected';
+function validateOrderedMakeSetPhase(enadata: ENAData, options: MakeSetOptions): void {
+  if (enadata.networkType !== 'ordered') return;
+
+  if (options.rotationSet !== undefined) {
+    throw new Error(
+      'Ordered makeSet does not accept rotationSet in the descriptive SVD-only phase.'
+    );
+  }
+
+  const rotationMethod = options.rotation?.method;
+  if (rotationMethod !== undefined && rotationMethod !== 'svd') {
+    throw new Error(
+      'Ordered makeSet supports only the default or explicit "svd" rotation in the ' +
+      `descriptive SVD-only phase; got "${rotationMethod}".`
+    );
+  }
+
+  if (options.nodePositionMethod === 'undirected') {
+    throw new Error(
+      'Ordered network analysis requires a directed node position method; got "undirected". ' +
+      'Omit nodePositionMethod to use "directed".'
+    );
+  }
+  if (options.nodePositionMethod === 'directed-ground-response') {
+    throw new Error(
+      'Ordered ENAData supports nodePositionMethod "directed"; ' +
+      '"directed-ground-response" requires explicitly paired ground/response rows.'
+    );
+  }
+
+  assertOrderedSvdBudget(enadata.connectionMatrix.length, enadata.codeColumns.length);
+}
+
+function makeNodePositions(
+  lineWeights: Matrix,
+  points: Matrix,
+  codeCount: number,
+  networkType: NetworkType,
+  options: MakeSetOptions
+): NodePositionResult {
+  const method = options.nodePositionMethod ?? (networkType === 'ordered' ? 'directed' : 'undirected');
+  if (networkType === 'ordered' && method === 'undirected') {
+    throw new Error(
+      'Ordered network analysis requires a directed node position method; got "undirected". ' +
+      'Omit nodePositionMethod to use "directed".'
+    );
+  }
+  if (networkType === 'ordered' && method === 'directed-ground-response') {
+    throw new Error(
+      'Ordered ENAData supports nodePositionMethod "directed"; ' +
+      '"directed-ground-response" requires explicitly paired ground/response rows.'
+    );
+  }
   if (method !== 'undirected') {
-    // This pipeline only accumulates undirected upper-triangle adjacency
-    // vectors (n*(n-1)/2 columns); a directed solver needs n*n columns and
-    // would otherwise return silently wrong coordinates (advisory F-003).
+    // Directed solvers require full n*n adjacency vectors and must never be
+    // applied to standard upper-triangle ENA data (advisory F-003).
     const width = lineWeights[0]?.length ?? 0;
     if (width !== codeCount * codeCount) {
       throw new Error(
@@ -149,7 +201,9 @@ function makeNodePositions(lineWeights: Matrix, points: Matrix, codeCount: numbe
 }
 
 export function makeSet(enadata: ENAData, options: MakeSetOptions = {}): ENASet {
+  validateENADataNetworkContract(enadata);
   validateMakeSetOptions(options);
+  validateOrderedMakeSetPhase(enadata, options);
   const dimensions = options.dimensions ?? 2;
   const centerAlignToOrigin = options.centerAlignToOrigin ?? true;
   const lineWeightsMatrix = sphereNorm(enadata.connectionMatrix);
@@ -162,7 +216,13 @@ export function makeSet(enadata: ENAData, options: MakeSetOptions = {}): ENASet 
   // ALL rotated dimensions; only display output is truncated to `dimensions`.
   const fullPointsMatrix = multiplyMatrices(pointsForProjection, rotationResult.rotationMatrix);
   const pointsMatrix = selectMatrixColumns(fullPointsMatrix, dimCount);
-  const nodePositionResult = makeNodePositions(lineWeightsMatrix, pointsMatrix, enadata.codes.length, options);
+  const nodePositionResult = makeNodePositions(
+    lineWeightsMatrix,
+    pointsMatrix,
+    enadata.codes.length,
+    enadata.networkType ?? 'standard',
+    options
+  );
   const variances = varianceColumns(fullPointsMatrix);
   const varianceTotal = variances.reduce((sum, value) => sum + value, 0);
   const variance = Object.fromEntries(rotationResult.rotationColumns.map((name, index) => [name, varianceTotal === 0 ? 0 : (variances[index] ?? 0) / varianceTotal]));
@@ -189,6 +249,11 @@ export function makeSet(enadata: ENAData, options: MakeSetOptions = {}): ENASet 
 }
 
 export function projectIn(enadata: ENAData, by: RotationSet | ENASet, options: Omit<MakeSetOptions, 'rotationSet'> = {}): ENASet {
+  if (enadata.networkType === 'ordered') {
+    throw new Error(
+      'projectIn does not support ordered ENAData in the descriptive SVD-only phase.'
+    );
+  }
   const rotationSet = 'rotation' in by ? by.rotation : by;
   return makeSet(enadata, { ...options, rotationSet });
 }

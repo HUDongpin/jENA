@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   centerData,
   combnC2,
+  l2Norm,
   refWindowLag,
   refWindowMatrix,
   rowsToCoOccurrences,
@@ -32,5 +33,44 @@ describe("core matrix utilities ported from rENA", () => {
     expect(refWindowLag([[1, 0], [0, 1], [1, 1]], 2)).toEqual([[1, 0], [1, 1], [1, 2]]);
     expect(sphereNorm([[3, 4], [0, 0]])).toEqual([[0.6, 0.8], [0, 0]]);
     expect(centerData([[1, 2], [3, 4]])).toEqual([[-1, -1], [1, 1]]);
+  });
+
+  it("normalizes extreme finite vectors without overflow or underflow", () => {
+    const huge = [5e299, 5e299];
+    const hugeNorm = l2Norm(huge);
+    const hugeNormalized = sphereNorm([huge])[0] ?? [];
+
+    expect(Number.isFinite(hugeNorm)).toBe(true);
+    expect(hugeNorm / 5e299).toBeCloseTo(Math.SQRT2, 15);
+    expect(hugeNormalized[0]).toBeCloseTo(Math.SQRT1_2, 15);
+    expect(hugeNormalized[1]).toBeCloseTo(Math.SQRT1_2, 15);
+
+    expect(l2Norm([0, -0])).toBe(0);
+    expect(l2Norm([3e-300, 4e-300]) / 1e-300).toBeCloseTo(5, 15);
+    expect(sphereNorm([[3e-300, 4e-300]])[0]?.[0]).toBeCloseTo(0.6, 15);
+    expect(sphereNorm([[3e-300, 4e-300]])[0]?.[1]).toBeCloseTo(0.8, 15);
+    expect(l2Norm([Number.MIN_VALUE, 3, 4])).toBe(5);
+    expect(l2Norm([Number.NaN, 1])).toBeNaN();
+    expect(l2Norm([Number.POSITIVE_INFINITY, 1])).toBe(Number.POSITIVE_INFINITY);
+    expect(l2Norm([Number.NEGATIVE_INFINITY, 1])).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it("normalizes finite rows whose true L2 norm exceeds Number.MAX_VALUE", () => {
+    const vector = [1.3e308, 1.3e308];
+    const normalized = sphereNorm([vector])[0] ?? [];
+
+    expect(l2Norm(vector)).toBe(Number.POSITIVE_INFINITY);
+    expect(normalized[0]).toBeCloseTo(Math.SQRT1_2, 15);
+    expect(normalized[1]).toBeCloseTo(Math.SQRT1_2, 15);
+    expect(Math.hypot(...normalized)).toBeCloseTo(1, 15);
+  });
+
+  it("preserves zero and non-finite sphere-normalization contracts", () => {
+    expect(sphereNorm([[0, -0]])).toEqual([[0, 0]]);
+    expect(sphereNorm([[Number.POSITIVE_INFINITY, 1]])).toEqual([[Number.NaN, 0]]);
+    expect(sphereNorm([[Number.NEGATIVE_INFINITY, 1]])).toEqual([[Number.NaN, 0]]);
+    expect(() => sphereNorm([[Number.NaN, 1]])).toThrowError(
+      "matrix[0][0] must be a number, got NaN."
+    );
   });
 });

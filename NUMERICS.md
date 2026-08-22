@@ -6,6 +6,34 @@ How jena-js computes ENA models, where it deliberately deviates from rENA's solv
 
 SVD/eigen decompositions determine each rotated dimension only up to sign. jena-js and rENA can legitimately return mirrored axes for the same model. Golden tests compare points, node positions, and rotation-matrix columns **up to a per-column sign**; downstream code must not attach meaning to the absolute sign of a dimension. This also flips the sign of signed group statistics (e.g. the Welch t statistic) relative to an rENA run — magnitudes match.
 
+## Ordered numerical boundary
+
+Ordered counts accept only finite non-negative raw values and masks. Products
+that overflow, positive products that underflow to zero, positive mask
+multiplication that underflows to zero, and monotonic unit aggregates that
+become non-finite all fail closed. A zero mask cell is treated as an exact edge
+exclusion and is short-circuited before the underlying product, so an excluded
+edge cannot trigger an irrelevant overflow. Moving windows and unit aggregates
+use the same floating-point expansion and half-even finalizer; regression tests
+cover a one-ULP boundary across batch, chunked, and manual streaming paths. If
+a retained prior expansion is larger than `Number.MAX_VALUE` but multiplying
+it by a fractional response has a finite mathematical result, each retained
+partial is scaled before the expansion is finalized. A zero response is
+short-circuited to exact zero. This prevents premature `Infinity` and
+`Infinity × 0 = NaN` while continuing to reject genuinely non-finite results.
+For a positive fractional directional mask, lagged and same-row contributions
+are also scaled before combining them when their unmasked sum is non-finite.
+The mask is applied first to the larger-magnitude product operand so rounding
+a smaller operand to a low-precision subnormal cannot be amplified afterward.
+Normal finite sums retain the established single mask multiplication and
+rounding path; mask-induced underflow, masks that amplify a true overflow, and
+non-finite masked results still fail closed.
+
+The ordered model is currently dense descriptive SVD. Its fixed resource guard
+allows at most 12 codes (144 directed edges), 8,000,000 estimated
+`units×E²+E³` work units, and 1 MiB of estimated dense numeric matrices. There
+is no opt-in bypass in this phase.
+
 ## Variance explained (rENA semantics)
 
 `makeSet` projects the centered, sphere-normed line weights onto the **full** rotation matrix (rENA `ena.make.set.R`: `points.for.projection %*% rotation.matrix`) and reports `variance` as each rotated dimension's share of the total variance across **all** dimensions. Shares over the displayed 2 dimensions therefore do not sum to 1. Golden agreement: 1e-9 per dimension on every fixture configuration.

@@ -14,7 +14,8 @@ export { makeSet, projectIn } from "./model.js";
 export {
   accumulateDataChunked,
   accumulateDataStreaming,
-  createAccumulationStream
+  createAccumulationStream,
+  expandOrderedPriorRowIndices
 } from "./performance.js";
 export type {
   AccumulationChunkState,
@@ -27,6 +28,7 @@ export type {
 export {
   adjacencyKey,
   meanColumns,
+  orderedAdjacencyKey,
   refWindowMatrix,
   rowsToCoOccurrences,
   skipSphereNorm,
@@ -35,6 +37,7 @@ export {
   sumColumns,
   vectorToUpperTriangle
 } from "./core/matrix.js";
+export { validateENADataNetworkContract } from "./core/validate.js";
 export {
   cohensD,
   dimensionSummary,

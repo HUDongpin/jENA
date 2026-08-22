@@ -62,6 +62,32 @@ export function adjacencyKey(codes: string[]): AdjacencyKeyEntry[] {
   });
 }
 
+/**
+ * Full ordered adjacency in column-major matrix order: response/target is the
+ * outer loop and ground/source is the inner loop. Thus an edge at matrix row
+ * `groundIndex`, column `responseIndex` has flat index
+ * `responseIndex * codes.length + groundIndex`.
+ */
+export function orderedAdjacencyKey(codes: string[]): AdjacencyKeyEntry[] {
+  const entries: AdjacencyKeyEntry[] = [];
+  for (let responseIndex = 0; responseIndex < codes.length; responseIndex += 1) {
+    for (let groundIndex = 0; groundIndex < codes.length; groundIndex += 1) {
+      const source = codes[groundIndex] ?? String(groundIndex);
+      const target = codes[responseIndex] ?? String(responseIndex);
+      entries.push({
+        source,
+        target,
+        // Match the official ONA/R golden header convention. Direction is
+        // carried unambiguously by source/target and their indices.
+        name: `${source} & ${target}`,
+        sourceIndex: groundIndex,
+        targetIndex: responseIndex
+      });
+    }
+  }
+  return entries;
+}
+
 export function vectorToUpperTriangle(vector: number[]): number[] {
   const out: number[] = [];
   for (let i = 1; i < vector.length; i += 1) {
@@ -130,8 +156,49 @@ export function dot(a: number[], b: number[]): number {
   return total;
 }
 
+interface ScaledL2State {
+  scale: number;
+  scaledSumSquares: number;
+  hasNaN: boolean;
+  hasInfinity: boolean;
+}
+
+function scaledL2State(vector: number[]): ScaledL2State {
+  let scale = 0;
+  let scaledSumSquares = 1;
+  let hasNaN = false;
+  let hasInfinity = false;
+
+  for (const value of vector) {
+    if (Number.isNaN(value)) {
+      hasNaN = true;
+      continue;
+    }
+    const magnitude = Math.abs(value);
+    if (magnitude === Number.POSITIVE_INFINITY) {
+      hasInfinity = true;
+      continue;
+    }
+    if (magnitude === 0) continue;
+
+    if (scale < magnitude) {
+      const ratio = scale / magnitude;
+      scaledSumSquares = 1 + scaledSumSquares * ratio * ratio;
+      scale = magnitude;
+    } else {
+      const ratio = magnitude / scale;
+      scaledSumSquares += ratio * ratio;
+    }
+  }
+
+  return { scale, scaledSumSquares, hasNaN, hasInfinity };
+}
+
 export function l2Norm(vector: number[]): number {
-  return Math.sqrt(dot(vector, vector));
+  const state = scaledL2State(vector);
+  if (state.hasNaN) return Number.NaN;
+  if (state.hasInfinity) return Number.POSITIVE_INFINITY;
+  return state.scale === 0 ? 0 : state.scale * Math.sqrt(state.scaledSumSquares);
 }
 
 export function refWindowMatrix(matrix: Matrix, windowSize = 1, windowForward = 0, binary = true): Matrix {
@@ -200,8 +267,13 @@ export function sphereNorm(matrix: Matrix): Matrix {
   assertRectangularMatrix(matrix);
   assertFiniteNumbers(matrix);
   return matrix.map((row) => {
-    const norm = l2Norm(row);
-    return norm > 0 ? row.map((value) => value / norm) : row.map(() => 0);
+    const state = scaledL2State(row);
+    if (state.hasInfinity) {
+      return row.map((value) => value / Number.POSITIVE_INFINITY);
+    }
+    if (state.scale === 0) return row.map(() => 0);
+    const scaledNorm = Math.sqrt(state.scaledSumSquares);
+    return row.map((value) => (value / state.scale) / scaledNorm);
   });
 }
 

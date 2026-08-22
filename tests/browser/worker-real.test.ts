@@ -63,6 +63,50 @@ describe("real browser worker round-trip", () => {
     client.terminate();
   });
 
+  it("terminates a synchronous model-stage run, recreates the worker, and stays reusable", async () => {
+    let workerCount = 0;
+    const workerFactory = (): Worker => {
+      workerCount += 1;
+      return makeWorker();
+    };
+    const codes = Array.from({ length: 24 }, (_unused, index) => `W${index}`);
+    const wideRows: Row[] = Array.from({ length: 90 }, (_unused, rowIndex) => ({
+      unit: `wide-${rowIndex}`,
+      conv: `wide-conv-${rowIndex % 3}`,
+      ...Object.fromEntries(codes.map((code, codeIndex) => [code, (rowIndex + codeIndex) % 5 < 2 ? 1 : 0]))
+    }));
+    const client = createENAWorkerClient(workerFactory(), { workerFactory });
+    const controller = new AbortController();
+    let reachedModel = false;
+
+    try {
+      const running = client.run({
+        units: ["unit"],
+        conversation: ["conv"],
+        codes,
+        rows: wideRows,
+        windowSizeBack: 1
+      }, {
+        chunkSize: wideRows.length,
+        signal: controller.signal,
+        onProgress: (progress) => {
+          if (progress.stage !== "model") return;
+          reachedModel = true;
+          controller.abort();
+        }
+      });
+
+      await expect(running).rejects.toBeInstanceOf(ENAWorkerCancelledError);
+      expect(reachedModel).toBe(true);
+      expect(workerCount).toBe(2);
+
+      const recovered = await client.run({ ...baseOptions, rows: makeRows(30) });
+      expect(recovered.points.length).toBeGreaterThan(0);
+    } finally {
+      client.terminate();
+    }
+  }, 15_000);
+
   it("propagates worker-side validation errors", async () => {
     const worker = makeWorker();
     const client = createENAWorkerClient(worker);

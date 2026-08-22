@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-23T02:53:03+0800",
+  "generator": {
+    "r": "R version 4.4.2 (2024-10-31)",
+    "platform": "aarch64-apple-darwin20",
+    "tma": "0.3.1",
+    "rENA": "0.3.1",
+    "jsonlite": "2.0.0",
+    "digest": "0.6.39",
+    "dataTable": "1.18.2.1",
+    "rlang": "1.1.7",
+    "Rcpp": "1.1.1",
+    "tmaSourceArchiveUrl": "https://cran.r-project.org/src/contrib/tma_0.3.1.tar.gz",
+    "tmaSourceArchiveSha256": "d661721d133055f3143c79742d4da08ae2427e9ec6b576fd5c8ef69d459ee260",
+    "generatorScript": "scripts/generate-ordered-window-golden.R",
+    "generatorScriptSha256": "319aa82984a1b6b71f37ef61e08f1ff8288b73b5cca77b881d719bc44c72e951",
+    "functionHashSpec": "sha256:R-serialize-v2:ascii=false",
+    "tmaFunctionBodySha256": {
+      "conversation_rules": "43082398a579f566fb6de45b8923c7f52a5812fa67455577b9e93adbd7dc664c",
+      "contexts": "3fd744d6fe9071c4af4b3bb2b9e531250b5d5aa62b19e4a8ec0a99356a5788e7",
+      "accumulate_contexts": "d6f44cddc0978ec26682bc2a0481b7ee7dabfd4fb1b133c8e0a2167ee2462ea0",
+      "decay": "e7773715bb45433330c0b4b2e2fe1e130287de263f989beba8951be52847631c",
+      "simple_window": "aeef752d401ecee64b0777e108666b52eb364f328b09a4ee6acbbd1729547854"
+    },
+    "tmaFunctionDefinitionSha256": {
+      "conversation_rules": "5cf01315da17e68b9c8bcca177767c7661df7f289b1b5b0b6c7a20ca42341eef",
+      "contexts": "f874983adb39b1b0975b818177bd072a1ad30c1b10d2ece51dc476d835d58e5d",
+      "accumulate_contexts": "67eaac0d04100b46d6aa52fba847325548491e2995431a3d383cb691dd472c67",
+      "decay": "73eced92c691cc51b46299bff177df730b7e16b83d4a4e51dc5d0c01d65d4a2a",
+      "simple_window": "336b0e4b9cf16041c8f035c62760ba648c2023090b45d8c09c1284d8a09a496f"
+    }
+  },
+  "parameterMapping": {
+    "tmaWindowSize": "maximum preceding rows",
+    "jenaWindowSizeBack": "current row plus maximum preceding rows",
+    "equation": "jenaWindowSizeBack = tmaWindowSize + 1"
+  },
+  "codes": ["A", "B", "C", "D"],
+  "rows": [
+    {
+      "unit": "u1",
+      "horizon": "h1",
+      "A": 1,
+      "B": 0,
+      "C": 0,
+      "D": 0
+    },
+    {
+      "unit": "u1",
+      "horizon": "h1",
+      "A": 0,
+      "B": 1,
+      "C": 0,
+      "D": 0
+    },
+    {
+      "unit": "u1",
+      "horizon": "h1",
+      "A": 0,
+      "B": 0,
+      "C": 1,
+      "D": 0
+    },
+    {
+      "unit": "u1",
+      "horizon": "h1",
+      "A": 0,
+      "B": 0,
+      "C": 0,
+      "D": 1
+    }
+  ],
+  "codeColumns": ["A & A", "B & A", "C & A", "D & A", "A & B", "B & B", "C & B", "D & B", "A & C", "B & C", "C & C", "D & C", "A & D", "B & D", "C & D", "D & D"],
+  "cases": [
+    {
+      "tmaWindowSize": 1,
+      "jenaWindowSizeBack": 2,
+      "connectionCounts": [0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]
+    },
+    {
+      "tmaWindowSize": 2,
+      "jenaWindowSizeBack": 3,
+      "connectionCounts": [0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0]
+    },
+    {
+      "tmaWindowSize": 3,
+      "jenaWindowSizeBack": 4,
+      "connectionCounts": [0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0]
+    }
+  ]
+}
