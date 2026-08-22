@@ -145,6 +145,25 @@ describe("makeSet ENAData network contract", () => {
     );
   });
 
+  it("rejects a negative ordered connectionMatrix cell", () => {
+    const data = orderedData();
+    const column = data.codeColumns[0]!;
+    const tampered: ENAData = {
+      ...data,
+      connectionMatrix: data.connectionMatrix.map((row, rowIndex) => (
+        row.map((value, columnIndex) => rowIndex === 0 && columnIndex === 0 ? -1 : value)
+      )),
+      connectionCounts: [
+        { ...data.connectionCounts[0]!, [column]: -1 },
+        ...data.connectionCounts.slice(1)
+      ]
+    };
+
+    expect(() => makeSet(tampered)).toThrowError(
+      "Ordered ENAData connectionMatrix[0][0] must be a finite non-negative number; got -1."
+    );
+  });
+
   it("rejects ordered row-count disagreement before matrix modeling", () => {
     const data = orderedData();
     const tampered: ENAData = {
@@ -187,6 +206,22 @@ describe("makeSet ENAData network contract", () => {
     };
     expect(() => makeSet(tampered)).toThrowError(
       `Ordered ENAData connectionCounts row 0 is missing directed column "${missingColumn}".`
+    );
+  });
+
+  it("rejects a negative ordered connectionCounts cell", () => {
+    const data = orderedData();
+    const column = data.codeColumns[0]!;
+    const tampered: ENAData = {
+      ...data,
+      connectionCounts: [
+        { ...data.connectionCounts[0]!, [column]: -1 },
+        ...data.connectionCounts.slice(1)
+      ]
+    };
+
+    expect(() => makeSet(tampered)).toThrowError(
+      `Ordered ENAData connectionCounts[0]["${column}"] must be a finite non-negative number; got -1.`
     );
   });
 

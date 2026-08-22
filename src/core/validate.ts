@@ -24,7 +24,7 @@ function firstDuplicate(values: string[]): string | undefined {
   return undefined;
 }
 
-function validateMask(mask: Matrix, codeCount: number): void {
+function validateMask(mask: Matrix, codeCount: number, ordered = false): void {
   if (!Array.isArray(mask) || mask.length !== codeCount) {
     throw new Error(`mask must be a ${codeCount}x${codeCount} matrix matching codes.length; got ${Array.isArray(mask) ? mask.length : typeof mask} rows.`);
   }
@@ -37,6 +37,9 @@ function validateMask(mask: Matrix, codeCount: number): void {
       const value = maskRow[col];
       if (typeof value !== 'number' || !Number.isFinite(value)) {
         throw new Error(`mask[${row}][${col}] must be a finite number; got ${String(value)}.`);
+      }
+      if (ordered && value < 0) {
+        throw new Error(`Ordered network analysis mask[${row}][${col}] must be non-negative; got ${String(value)}.`);
       }
     }
   }
@@ -79,7 +82,7 @@ export function validateAccumulateOptions(
     throw new Error(`windowSizeForward must be a non-negative integer or Infinity; got ${String(options.windowSizeForward)}.`);
   }
   if (options.mask !== undefined) {
-    validateMask(options.mask, options.codes.length);
+    validateMask(options.mask, options.codes.length, options.networkType === 'ordered');
   }
   if (options.unitsUsed !== undefined && (!Array.isArray(options.unitsUsed) || options.unitsUsed.length === 0)) {
     throw new Error('unitsUsed must be a non-empty array of unit labels when provided; omit it to keep every unit.');
@@ -362,6 +365,11 @@ export function validateENADataNetworkContract(enadata: ENAData): void {
           `Ordered ENAData connectionMatrix[${rowIndex}][${columnIndex}] must be a finite number; got ${String(value)}.`
         );
       }
+      if (value < 0) {
+        throw new Error(
+          `Ordered ENAData connectionMatrix[${rowIndex}][${columnIndex}] must be a finite non-negative number; got ${String(value)}.`
+        );
+      }
     }
   }
   if (!Array.isArray(enadata.connectionCounts)) {
@@ -391,6 +399,11 @@ export function validateENADataNetworkContract(enadata: ENAData): void {
       if (typeof countValue !== 'number' || !Number.isFinite(countValue)) {
         throw new Error(
           `Ordered ENAData connectionCounts[${rowIndex}]["${column}"] must be a finite number; got ${String(countValue)}.`
+        );
+      }
+      if (countValue < 0) {
+        throw new Error(
+          `Ordered ENAData connectionCounts[${rowIndex}]["${column}"] must be a finite non-negative number; got ${String(countValue)}.`
         );
       }
       if (countValue !== enadata.connectionMatrix[rowIndex]?.[columnIndex]) {

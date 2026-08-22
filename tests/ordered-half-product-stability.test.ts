@@ -91,6 +91,18 @@ describe.each(accumulationModes)("ordered half-product stability through $name a
     );
   });
 
+  it("rejects negative ordered directional-mask weights", () => {
+    expect(() => run({
+      ...optionsFor([{ unit: "u1", horizon: "h1", A: 2, B: 2 }], "ordered"),
+      mask: [
+        [1, -1],
+        [1, 1]
+      ]
+    })).toThrowError(
+      "Ordered network analysis mask[0][1] must be non-negative; got -1."
+    );
+  });
+
   it("fails closed when finite ordered row contributions overflow during unit aggregation", () => {
     expect(() => run(optionsFor(Array.from({ length: 3 }, () => ({
       unit: "u1",
@@ -167,5 +179,17 @@ describe.each(accumulationModes)("ordered half-product stability through $name a
     ], "standard"));
 
     expect(data.connectionMatrix).toEqual([[Number.MIN_VALUE * 2]]);
+  });
+
+  it("leaves finite negative standard mask weights unchanged", () => {
+    const data = run({
+      ...optionsFor([{ unit: "u1", horizon: "h1", A: 2, B: 2 }], "standard"),
+      mask: [
+        [1, -1],
+        [1, 1]
+      ]
+    });
+
+    expect(data.connectionMatrix).toEqual([[-4]]);
   });
 });
