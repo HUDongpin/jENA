@@ -16,7 +16,7 @@ import type {
   RotationSet
 } from './types.js';
 import { centerData, meanColumns, multiplyMatrices, sphereNorm, varianceColumns } from './core/matrix.js';
-import { validateMakeSetOptions } from './core/validate.js';
+import { validateENADataNetworkContract, validateMakeSetOptions } from './core/validate.js';
 import { svdRotation } from './rotation/svd.js';
 import {
   centroidsAsRows,
@@ -161,6 +161,7 @@ function makeNodePositions(
 }
 
 export function makeSet(enadata: ENAData, options: MakeSetOptions = {}): ENASet {
+  validateENADataNetworkContract(enadata);
   validateMakeSetOptions(options);
   const dimensions = options.dimensions ?? 2;
   const centerAlignToOrigin = options.centerAlignToOrigin ?? true;

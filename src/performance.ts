@@ -26,7 +26,7 @@ import {
   vectorToUpperTriangle
 } from './core/index.js';
 import { assertNonEmptyColumns, assertRowsHaveColumns } from './core/guards.js';
-import { mergeColumns } from './core/table.js';
+import { mergeColumns, typedTupleIdentity } from './core/table.js';
 import { validateAccumulateOptions } from './core/validate.js';
 
 export interface NumericTable {
@@ -69,6 +69,50 @@ export interface AccumulationStream {
   reset(): void;
 }
 
+/**
+ * Expands the exact prior rows represented by compact ordered-window
+ * provenance. The result is ordered from the oldest prior row to the newest.
+ */
+export function expandOrderedPriorRowIndices(
+  provenance: readonly OrderedWindowProvenance[],
+  responseRowIndex: number
+): number[] {
+  if (!Number.isInteger(responseRowIndex) || responseRowIndex < 0) {
+    throw new Error(`responseRowIndex must be a non-negative integer; got ${String(responseRowIndex)}.`);
+  }
+  const byResponseRow = new Map<number, OrderedWindowProvenance>();
+  for (const entry of provenance) {
+    if (byResponseRow.has(entry.responseRowIndex)) {
+      throw new Error(`Ordered window provenance contains duplicate responseRowIndex ${entry.responseRowIndex}.`);
+    }
+    byResponseRow.set(entry.responseRowIndex, entry);
+  }
+  const requested = byResponseRow.get(responseRowIndex);
+  if (!requested) {
+    throw new Error(`Ordered window provenance has no response row ${responseRowIndex}.`);
+  }
+
+  const newestToOldest: number[] = [];
+  const visited = new Set<number>();
+  let previousRowIndex = requested.previousRowIndex;
+  for (let remaining = requested.priorRowCount; remaining > 0; remaining -= 1) {
+    if (previousRowIndex === null) {
+      throw new Error(`Ordered window provenance for response row ${responseRowIndex} ends before priorRowCount is satisfied.`);
+    }
+    if (visited.has(previousRowIndex)) {
+      throw new Error(`Ordered window provenance for response row ${responseRowIndex} contains a predecessor cycle.`);
+    }
+    visited.add(previousRowIndex);
+    newestToOldest.push(previousRowIndex);
+    const previous = byResponseRow.get(previousRowIndex);
+    if (!previous) {
+      throw new Error(`Ordered window provenance is missing predecessor row ${previousRowIndex}.`);
+    }
+    previousRowIndex = previous.previousRowIndex;
+  }
+  return newestToOldest.reverse();
+}
+
 interface StreamRowEntry {
   globalIndex: number;
   localIndex: number;
@@ -84,6 +128,8 @@ interface MovingConversationState {
   buffer: StreamRowEntry[];
   noForwardHistory: number[][];
   noForwardRunningSum: number[];
+  orderedRunningSum: number[];
+  orderedPreviousRowIndex: number | null;
   orderedHistory: StreamRowEntry[];
 }
 
@@ -137,6 +183,7 @@ interface StreamingInternals {
   stepOrder: string[];
   metadataStates: Map<string, MetadataState>;
   metadataOrder: string[];
+  orderedUnitDisplayIdentities: Map<string, string>;
   rowConnectionSequence: number;
 }
 
@@ -217,6 +264,26 @@ function makeUnitRow(row: Row, units: string[]): Row {
   return { ...row, ENA_UNIT: mergeColumns(row, units) };
 }
 
+function unitMapKey(internals: StreamingInternals, row: Row): string {
+  return internals.networkType === 'ordered'
+    ? typedTupleIdentity(row, internals.units)
+    : String(row.ENA_UNIT ?? mergeColumns(row, internals.units));
+}
+
+function assertOrderedUnitDisplayIsUnique(internals: StreamingInternals, row: Row): void {
+  if (internals.networkType !== 'ordered') return;
+  const displayLabel = String(row.ENA_UNIT ?? mergeColumns(row, internals.units));
+  const identity = typedTupleIdentity(row, internals.units);
+  const previousIdentity = internals.orderedUnitDisplayIdentities.get(displayLabel);
+  if (previousIdentity !== undefined && previousIdentity !== identity) {
+    throw new Error(
+      `Ordered network analysis unit label collision: distinct typed unit tuples format as "${displayLabel}"; ` +
+      'use unambiguous unit values or columns.'
+    );
+  }
+  internals.orderedUnitDisplayIdentities.set(displayLabel, identity);
+}
+
 // Flattens the upper triangle of the code mask once so masking a row is a
 // single elementwise multiply instead of an O(E^2) index scan per row
 // (advisory F-013 hot spot).
@@ -266,8 +333,8 @@ function rowWithCoOccurrences(base: Row, co: number[], codeColumns: string[]): R
 
 function ensureMetadata(internals: StreamingInternals, row: Row, sequence: number): void {
   if (!internals.includeMeta) return;
-  const unit = String(row.ENA_UNIT ?? '');
-  let state = internals.metadataStates.get(unit);
+  const unitKey = unitMapKey(internals, row);
+  let state = internals.metadataStates.get(unitKey);
   if (!state) {
     state = {
       row: Object.fromEntries(['ENA_UNIT', ...internals.units].map((column) => [column, row[column] ?? null])) as Row,
@@ -276,8 +343,8 @@ function ensureMetadata(internals: StreamingInternals, row: Row, sequence: numbe
       sequence
     };
     for (const column of internals.metadata) state.values.set(column, row[column] ?? null);
-    internals.metadataStates.set(unit, state);
-    internals.metadataOrder.push(unit);
+    internals.metadataStates.set(unitKey, state);
+    internals.metadataOrder.push(unitKey);
     return;
   }
   for (const column of internals.metadata) {
@@ -288,13 +355,14 @@ function ensureMetadata(internals: StreamingInternals, row: Row, sequence: numbe
 }
 
 function ensureEndpointCount(internals: StreamingInternals, row: Row, sequence: number): CountAccumulator {
-  const key = String(row.ENA_UNIT ?? mergeColumns(row, internals.units));
+  const key = unitMapKey(internals, row);
+  const displayLabel = String(row.ENA_UNIT ?? mergeColumns(row, internals.units));
   let accumulator = internals.endpointCounts.get(key);
   if (!accumulator) {
     accumulator = {
       row: {
         ...Object.fromEntries(internals.units.map((column) => [column, row[column] ?? null])),
-        ENA_UNIT: key
+        ENA_UNIT: displayLabel
       },
       sums: zeros(internals.codeColumns.length),
       sequence
@@ -395,24 +463,28 @@ function makeOrderedNoForwardConnections(
   const priorLimit = Number.isFinite(internals.windowSizeBack)
     ? Math.max(0, internals.windowSizeBack - 1)
     : Number.POSITIVE_INFINITY;
-  const priorEntries = priorLimit === 0
-    ? []
-    : Number.isFinite(priorLimit)
-      ? state.orderedHistory.slice(-priorLimit)
-      : state.orderedHistory;
-  const prior = sumCodeVectors(priorEntries.map((candidate) => candidate.codeValues), internals.codes.length);
+  const priorRowCount = Number.isFinite(priorLimit)
+    ? state.orderedHistory.length
+    : state.rowsSeen - 1;
+  const connections = orderedConnections(state.orderedRunningSum, entry.codeValues);
 
   internals.rowWindowProvenance.push({
     responseRowIndex: entry.globalIndex,
     horizon: state.key,
-    priorRowIndices: priorEntries.map((candidate) => candidate.globalIndex)
+    previousRowIndex: state.orderedPreviousRowIndex,
+    priorRowCount
   });
 
-  state.orderedHistory.push(entry);
+  state.orderedPreviousRowIndex = entry.globalIndex;
+  state.orderedRunningSum = addVectors(state.orderedRunningSum, entry.codeValues);
   if (Number.isFinite(priorLimit)) {
-    while (state.orderedHistory.length > priorLimit) state.orderedHistory.shift();
+    state.orderedHistory.push(entry);
+    while (state.orderedHistory.length > priorLimit) {
+      const removed = state.orderedHistory.shift();
+      if (removed) state.orderedRunningSum = subtractVectors(state.orderedRunningSum, removed.codeValues);
+    }
   }
-  return orderedConnections(prior, entry.codeValues);
+  return connections;
 }
 
 function rowsForLocalRange(state: MovingConversationState, earliest: number, last: number): number[][] {
@@ -482,27 +554,32 @@ function emitReadyRows(state: MovingConversationState, final: boolean, internals
   }
 }
 
-function getMovingConversation(internals: StreamingInternals, key: string): MovingConversationState {
-  let state = internals.movingConversations.get(key);
+function getMovingConversation(internals: StreamingInternals, identityKey: string, displayLabel: string): MovingConversationState {
+  let state = internals.movingConversations.get(identityKey);
   if (!state) {
     state = {
-      key,
+      key: displayLabel,
       rowsSeen: 0,
       nextEmitLocalIndex: 0,
       bufferOffset: 0,
       buffer: [],
       noForwardHistory: [],
       noForwardRunningSum: zeros(internals.codes.length),
+      orderedRunningSum: zeros(internals.codes.length),
+      orderedPreviousRowIndex: null,
       orderedHistory: []
     };
-    internals.movingConversations.set(key, state);
+    internals.movingConversations.set(identityKey, state);
   }
   return state;
 }
 
 function pushMovingRow(internals: StreamingInternals, row: Row, globalIndex: number): void {
-  const key = mergeColumns(row, internals.conversation);
-  const state = getMovingConversation(internals, key);
+  const displayLabel = mergeColumns(row, internals.conversation);
+  const identityKey = internals.networkType === 'ordered'
+    ? typedTupleIdentity(row, internals.conversation)
+    : displayLabel;
+  const state = getMovingConversation(internals, identityKey, displayLabel);
   const entry: StreamRowEntry = {
     globalIndex,
     localIndex: state.rowsSeen,
@@ -578,13 +655,13 @@ function stableMetadataColumns(internals: StreamingInternals): string[] {
   });
 }
 
-function buildMetadataRows(internals: StreamingInternals, countUnits: Set<string>): Row[] {
+function buildMetadataRows(internals: StreamingInternals, countUnitKeys: Set<string>): Row[] {
   const stable = stableMetadataColumns(internals);
   return internals.metadataOrder
-    .filter((unit) => countUnits.has(unit))
-    .map((unit) => {
-      const state = internals.metadataStates.get(unit);
-      const base = state?.row ?? { ENA_UNIT: unit };
+    .filter((unitKey) => countUnitKeys.has(unitKey))
+    .map((unitKey) => {
+      const state = internals.metadataStates.get(unitKey);
+      const base = state?.row ?? { ENA_UNIT: unitKey };
       return {
         ...base,
         ...Object.fromEntries(stable.map((column) => [column, state?.values.get(column) ?? null]))
@@ -604,8 +681,7 @@ function makeEndpointResult(internals: StreamingInternals): { connectionCounts: 
       ...Object.fromEntries(internals.codeColumns.map((column, index) => [column, accumulator?.sums[index] ?? 0]))
     } as Row;
   });
-  const countUnits = new Set(countRows.map((row) => String(row.ENA_UNIT ?? '')));
-  const metaData = buildMetadataRows(internals, countUnits);
+  const metaData = buildMetadataRows(internals, new Set(internals.endpointOrder));
   const metaByUnit = new Map(metaData.map((row) => [String(row.ENA_UNIT ?? ''), row]));
   return {
     countRows,
@@ -712,8 +788,12 @@ function finishInternals(internals: StreamingInternals): ENAData {
   if (internals.networkType === 'ordered') {
     result.networkType = 'ordered';
     result.functionParams.networkType = 'ordered';
-    result.rowWindowProvenance = [...internals.rowWindowProvenance]
-      .sort((left, right) => left.responseRowIndex - right.responseRowIndex);
+    // Ordered rows are emitted synchronously in global input order because
+    // forward windows are rejected, so preserving insertion order avoids an
+    // unnecessary O(n log n) finish step for unbounded horizons.
+    result.rowWindowProvenance = [...internals.rowWindowProvenance];
+    internals.movingConversations.clear();
+    internals.conversationAggregates.clear();
   }
   return result;
 }
@@ -775,12 +855,14 @@ function makeInternals(options: StreamingAccumulateOptions): StreamingInternals 
     stepOrder: [],
     metadataStates: new Map(),
     metadataOrder: [],
+    orderedUnitDisplayIdentities: new Map(),
     rowConnectionSequence: 0
   };
 }
 
 function ingestRow(internals: StreamingInternals, row: Row, globalIndex: number): void {
   const rowWithUnit = makeUnitRow(row, internals.units);
+  assertOrderedUnitDisplayIsUnique(internals, rowWithUnit);
   if (internals.materialization === 'full') internals.rawRows.push(rowWithUnit);
   ensureMetadata(internals, rowWithUnit, globalIndex);
   registerCountAccumulator(internals, rowWithUnit, globalIndex);

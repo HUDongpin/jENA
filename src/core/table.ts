@@ -9,6 +9,23 @@ export function mergeColumns(row: Row, columns: string[], separator = '::'): str
   return columns.map((column) => scalarToString(row[column] ?? null)).join(separator);
 }
 
+function typedScalarIdentity(value: Scalar | undefined): [string, string?] {
+  if (value === undefined) return ['undefined'];
+  if (value === null) return ['null'];
+  if (typeof value === 'string') return ['string', value];
+  if (typeof value === 'boolean') return ['boolean', value ? 'true' : 'false'];
+  if (Number.isNaN(value)) return ['number', 'NaN'];
+  if (value === Number.POSITIVE_INFINITY) return ['number', 'Infinity'];
+  if (value === Number.NEGATIVE_INFINITY) return ['number', '-Infinity'];
+  if (Object.is(value, -0)) return ['number', '-0'];
+  return ['number', String(value)];
+}
+
+/** Collision-free identity for an ordered, typed tuple of Row columns. */
+export function typedTupleIdentity(row: Row, columns: string[]): string {
+  return JSON.stringify(columns.map((column) => [column, ...typedScalarIdentity(row[column])]));
+}
+
 export function addMergedColumn(rows: Row[], outputColumn: string, columns: string[], separator = '::'): Row[] {
   assertRowsHaveColumns(rows, columns);
   return rows.map((row) => ({ ...row, [outputColumn]: mergeColumns(row, columns, separator) }));

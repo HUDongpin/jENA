@@ -1,4 +1,5 @@
-import type { AccumulateOptions, MakeSetOptions, Matrix } from '../types.js';
+import type { AccumulateOptions, ENAData, MakeSetOptions, Matrix, WeightBy } from '../types.js';
+import { adjacencyKey, orderedAdjacencyKey } from './matrix.js';
 
 // Boundary validation for the public entry points (advisory F-011). Every
 // rejection names the offending option and how to fix it, so malformed input
@@ -12,6 +13,15 @@ const NODE_POSITION_METHODS = new Set(['undirected', 'directed', 'directed-groun
 
 function isWindowSize(value: number): boolean {
   return value === Number.POSITIVE_INFINITY || (Number.isInteger(value) && value >= 0);
+}
+
+function firstDuplicate(values: string[]): string | undefined {
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (seen.has(value)) return value;
+    seen.add(value);
+  }
+  return undefined;
 }
 
 function validateMask(mask: Matrix, codeCount: number): void {
@@ -46,6 +56,10 @@ export function validateAccumulateOptions(
   if (!Array.isArray(options.codes) || options.codes.length < 2) {
     throw new Error(`codes must list at least 2 code columns to model co-occurrences; got ${Array.isArray(options.codes) ? options.codes.length : typeof options.codes}.`);
   }
+  const duplicateCode = firstDuplicate(options.codes);
+  if (duplicateCode !== undefined) {
+    throw new Error(`codes must contain unique column labels; duplicate "${duplicateCode}".`);
+  }
   if (options.networkType !== undefined && !NETWORK_TYPES.has(options.networkType)) {
     throw new Error(`networkType must be one of ${[...NETWORK_TYPES].join(', ')}; got "${String(options.networkType)}".`);
   }
@@ -72,6 +86,10 @@ export function validateAccumulateOptions(
   }
 
   if (options.networkType === 'ordered') {
+    const orderedHeaders = orderedAdjacencyKey(options.codes).map((entry) => entry.name);
+    if (new Set(orderedHeaders).size !== orderedHeaders.length) {
+      throw new Error('Ordered adjacency headers collide; use unambiguous code labels so every "<ground> & <response>" header is unique.');
+    }
     const model = options.model ?? 'EndPoint';
     if (model !== 'EndPoint') {
       throw new Error(`Ordered network analysis requires model "EndPoint"; got "${model}".`);
@@ -104,5 +122,234 @@ export function validateMakeSetOptions(options: MakeSetOptions): void {
   }
   if (options.nodePositionMethod !== undefined && !NODE_POSITION_METHODS.has(options.nodePositionMethod)) {
     throw new Error(`nodePositionMethod must be one of ${[...NODE_POSITION_METHODS].join(', ')}; got "${String(options.nodePositionMethod)}".`);
+  }
+}
+
+function formatWeightBy(weightBy: WeightBy): string {
+  return typeof weightBy === 'function' ? 'function' : `"${weightBy}"`;
+}
+
+function validateExplicitStandardENADataSchema(enadata: ENAData): void {
+  if (!Array.isArray(enadata.codes) || enadata.codes.length < 2) {
+    throw new Error('Explicit standard ENAData codes must contain at least two unique labels.');
+  }
+  const duplicateCode = firstDuplicate(enadata.codes);
+  if (duplicateCode !== undefined) {
+    throw new Error(`Explicit standard ENAData codes must be unique; duplicate "${duplicateCode}".`);
+  }
+  const expectedKey = adjacencyKey(enadata.codes);
+  const expectedWidth = expectedKey.length;
+  if (!Array.isArray(enadata.codeColumns) || enadata.codeColumns.length !== expectedWidth) {
+    throw new Error(
+      `Explicit standard ENAData codeColumns must contain ${expectedWidth} upper-triangle headers for ` +
+      `${enadata.codes.length} codes; got ${Array.isArray(enadata.codeColumns) ? enadata.codeColumns.length : typeof enadata.codeColumns}. ` +
+      'Omit networkType only for legacy externally constructed directed data.'
+    );
+  }
+  for (let index = 0; index < expectedWidth; index += 1) {
+    const expected = expectedKey[index];
+    if (enadata.codeColumns[index] !== expected?.name) {
+      throw new Error(
+        `Explicit standard ENAData codeColumns entry ${index} must be "${String(expected?.name)}"; ` +
+        `got "${String(enadata.codeColumns[index])}".`
+      );
+    }
+  }
+  if (!Array.isArray(enadata.adjacencyKey) || enadata.adjacencyKey.length !== expectedWidth) {
+    throw new Error(`Explicit standard ENAData adjacencyKey must contain ${expectedWidth} upper-triangle entries.`);
+  }
+  for (let index = 0; index < expectedWidth; index += 1) {
+    const actual = enadata.adjacencyKey[index];
+    const expected = expectedKey[index];
+    if (!actual || !expected ||
+      actual.source !== expected.source || actual.target !== expected.target ||
+      actual.name !== expected.name || actual.sourceIndex !== expected.sourceIndex ||
+      actual.targetIndex !== expected.targetIndex) {
+      throw new Error(`Explicit standard ENAData adjacencyKey entry ${index} does not match the required upper-triangle key.`);
+    }
+  }
+  if (!Array.isArray(enadata.connectionMatrix)) {
+    throw new Error('Explicit standard ENAData connectionMatrix must be an array of undirected rows.');
+  }
+  for (let rowIndex = 0; rowIndex < enadata.connectionMatrix.length; rowIndex += 1) {
+    const row = enadata.connectionMatrix[rowIndex];
+    if (!Array.isArray(row) || row.length !== expectedWidth) {
+      throw new Error(
+        `Explicit standard ENAData connectionMatrix row ${rowIndex} must contain ${expectedWidth} upper-triangle cells; ` +
+        `got ${Array.isArray(row) ? row.length : typeof row}.`
+      );
+    }
+  }
+}
+
+/** Validates untrusted/manual ENAData before normalization, rotation, or SVD. */
+export function validateENADataNetworkContract(enadata: ENAData): void {
+  if (enadata.networkType !== undefined && !NETWORK_TYPES.has(enadata.networkType)) {
+    throw new Error(`ENAData networkType must be one of ${[...NETWORK_TYPES].join(', ')}; got "${String(enadata.networkType)}".`);
+  }
+  if (!MODELS.has(enadata.modelType)) {
+    throw new Error(`ENAData modelType must be one of ${[...MODELS].join(', ')}; got "${String(enadata.modelType)}".`);
+  }
+  if (!enadata.functionParams || typeof enadata.functionParams !== 'object') {
+    throw new Error('ENAData functionParams must be an object.');
+  }
+  if (!MODELS.has(enadata.functionParams.model)) {
+    throw new Error(`ENAData functionParams.model must be one of ${[...MODELS].join(', ')}; got "${String(enadata.functionParams.model)}".`);
+  }
+  if (enadata.modelType !== enadata.functionParams.model) {
+    throw new Error(
+      `ENAData modelType "${enadata.modelType}" does not match functionParams.model "${enadata.functionParams.model}".`
+    );
+  }
+  const paramsNetworkType = enadata.functionParams.networkType;
+  if (paramsNetworkType !== undefined && !NETWORK_TYPES.has(paramsNetworkType)) {
+    throw new Error(
+      `ENAData functionParams.networkType must be one of ${[...NETWORK_TYPES].join(', ')} when provided; ` +
+      `got "${String(paramsNetworkType)}".`
+    );
+  }
+  const dataNetworkType = enadata.networkType ?? 'standard';
+  const normalizedParamsNetworkType = paramsNetworkType ?? 'standard';
+  if (dataNetworkType !== normalizedParamsNetworkType) {
+    throw new Error(
+      `ENAData networkType "${dataNetworkType}" does not match ` +
+      `functionParams.networkType "${normalizedParamsNetworkType}".`
+    );
+  }
+
+  // Only an absent discriminator receives the legacy exception. Historically
+  // jENA accepted externally constructed n*n matrices with an explicit
+  // directed solver; callers can preserve that path by omitting networkType.
+  if (dataNetworkType !== 'ordered') {
+    if (enadata.networkType === 'standard') validateExplicitStandardENADataSchema(enadata);
+    return;
+  }
+
+  if (enadata.modelType !== 'EndPoint' || enadata.functionParams.model !== 'EndPoint') {
+    throw new Error('Ordered ENAData requires modelType and functionParams.model to be "EndPoint".');
+  }
+  if (enadata.functionParams.window !== 'MovingStanzaWindow') {
+    throw new Error(
+      `Ordered ENAData requires functionParams.window "MovingStanzaWindow"; got "${String(enadata.functionParams.window)}".`
+    );
+  }
+  const back = enadata.functionParams.windowSizeBack;
+  if (back !== Number.POSITIVE_INFINITY && (!Number.isInteger(back) || back < 1)) {
+    throw new Error(
+      `Ordered ENAData requires functionParams.windowSizeBack to be an integer >= 1 or Infinity; got ${String(back)}.`
+    );
+  }
+  if (enadata.functionParams.windowSizeForward !== 0) {
+    throw new Error(
+      `Ordered ENAData requires functionParams.windowSizeForward 0; got ${String(enadata.functionParams.windowSizeForward)}.`
+    );
+  }
+  if (enadata.functionParams.weightBy !== 'sum') {
+    throw new Error(
+      `Ordered ENAData requires functionParams.weightBy "sum"; got ${formatWeightBy(enadata.functionParams.weightBy)}.`
+    );
+  }
+  if (!Array.isArray(enadata.codes) || enadata.codes.length < 2) {
+    throw new Error('Ordered ENAData codes must contain at least two unique labels.');
+  }
+  const duplicateCode = firstDuplicate(enadata.codes);
+  if (duplicateCode !== undefined) {
+    throw new Error(`Ordered ENAData codes must be unique; duplicate "${duplicateCode}".`);
+  }
+
+  const expectedKey = orderedAdjacencyKey(enadata.codes);
+  const expectedWidth = expectedKey.length;
+  const expectedHeaders = expectedKey.map((entry) => entry.name);
+  if (new Set(expectedHeaders).size !== expectedHeaders.length) {
+    throw new Error('Ordered ENAData adjacency headers collide; use unambiguous code labels.');
+  }
+  if (!Array.isArray(enadata.codeColumns) || enadata.codeColumns.length !== expectedWidth) {
+    throw new Error(
+      `Ordered ENAData codeColumns must contain ${expectedWidth} column-major directed headers for ` +
+      `${enadata.codes.length} codes; got ${Array.isArray(enadata.codeColumns) ? enadata.codeColumns.length : typeof enadata.codeColumns}.`
+    );
+  }
+  for (let index = 0; index < expectedWidth; index += 1) {
+    if (enadata.codeColumns[index] !== expectedHeaders[index]) {
+      throw new Error(
+        `Ordered ENAData codeColumns entry ${index} must be "${expectedHeaders[index]}"; ` +
+        `got "${String(enadata.codeColumns[index])}".`
+      );
+    }
+  }
+  if (!Array.isArray(enadata.adjacencyKey) || enadata.adjacencyKey.length !== expectedWidth) {
+    throw new Error(
+      `Ordered ENAData adjacencyKey must contain ${expectedWidth} column-major entries; ` +
+      `got ${Array.isArray(enadata.adjacencyKey) ? enadata.adjacencyKey.length : typeof enadata.adjacencyKey}.`
+    );
+  }
+  for (let index = 0; index < expectedWidth; index += 1) {
+    const actual = enadata.adjacencyKey[index];
+    const expected = expectedKey[index];
+    if (!actual || !expected ||
+      actual.source !== expected.source || actual.target !== expected.target ||
+      actual.name !== expected.name || actual.sourceIndex !== expected.sourceIndex ||
+      actual.targetIndex !== expected.targetIndex) {
+      throw new Error(
+        `Ordered ENAData adjacencyKey entry ${index} does not match the required column-major ground-to-response key.`
+      );
+    }
+  }
+  if (!Array.isArray(enadata.connectionMatrix)) {
+    throw new Error('Ordered ENAData connectionMatrix must be an array of directed rows.');
+  }
+  for (let rowIndex = 0; rowIndex < enadata.connectionMatrix.length; rowIndex += 1) {
+    const row = enadata.connectionMatrix[rowIndex];
+    if (!Array.isArray(row) || row.length !== expectedWidth) {
+      throw new Error(
+        `Ordered ENAData connectionMatrix row ${rowIndex} must contain ${expectedWidth} directed cells; ` +
+        `got ${Array.isArray(row) ? row.length : typeof row}.`
+      );
+    }
+    for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
+      const value = row[columnIndex];
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error(
+          `Ordered ENAData connectionMatrix[${rowIndex}][${columnIndex}] must be a finite number; got ${String(value)}.`
+        );
+      }
+    }
+  }
+  if (!Array.isArray(enadata.connectionCounts)) {
+    throw new Error('Ordered ENAData connectionCounts must be an array of directed count rows.');
+  }
+  if (!Array.isArray(enadata.unitLabels)) {
+    throw new Error('Ordered ENAData unitLabels must be an array.');
+  }
+  if (enadata.connectionMatrix.length !== enadata.connectionCounts.length ||
+    enadata.connectionMatrix.length !== enadata.unitLabels.length) {
+    throw new Error(
+      `Ordered ENAData row counts must agree: connectionMatrix has ${enadata.connectionMatrix.length} rows, ` +
+      `connectionCounts has ${enadata.connectionCounts.length}, and unitLabels has ${enadata.unitLabels.length}.`
+    );
+  }
+  for (let rowIndex = 0; rowIndex < enadata.connectionCounts.length; rowIndex += 1) {
+    const countRow = enadata.connectionCounts[rowIndex];
+    if (!countRow || typeof countRow !== 'object' || Array.isArray(countRow)) {
+      throw new Error(`Ordered ENAData connectionCounts row ${rowIndex} must be an object.`);
+    }
+    for (let columnIndex = 0; columnIndex < expectedHeaders.length; columnIndex += 1) {
+      const column = expectedHeaders[columnIndex]!;
+      if (!Object.prototype.hasOwnProperty.call(countRow, column)) {
+        throw new Error(`Ordered ENAData connectionCounts row ${rowIndex} is missing directed column "${column}".`);
+      }
+      const countValue = countRow[column];
+      if (typeof countValue !== 'number' || !Number.isFinite(countValue)) {
+        throw new Error(
+          `Ordered ENAData connectionCounts[${rowIndex}]["${column}"] must be a finite number; got ${String(countValue)}.`
+        );
+      }
+      if (countValue !== enadata.connectionMatrix[rowIndex]?.[columnIndex]) {
+        throw new Error(
+          `Ordered ENAData connectionCounts[${rowIndex}]["${column}"] does not match ` +
+          `connectionMatrix[${rowIndex}][${columnIndex}].`
+        );
+      }
+    }
   }
 }

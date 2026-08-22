@@ -3,7 +3,8 @@ import {
   accumulateData,
   accumulateDataChunked,
   createAccumulationStream,
-  ena
+  ena,
+  expandOrderedPriorRowIndices
 } from "../src/index.js";
 import type { AccumulateOptions, ENAData, Row } from "../src/index.js";
 
@@ -124,6 +125,41 @@ describe("ordered network accumulation", () => {
     expect(edgeValue(data.connectionCounts[0]!, data, "A", "B")).toBe(0);
   });
 
+  it("keeps delimiter-colliding composite horizon tuples in separate ordered contexts", () => {
+    const data = accumulateData(orderedOptions([
+      { unit: "u1", h1: "a::b", h2: "c", A: 1, B: 0 },
+      { unit: "u1", h1: "a", h2: "b::c", A: 0, B: 1 }
+    ], {
+      conversation: ["h1", "h2"],
+      windowSizeBack: 2
+    }));
+
+    expect(edgeValue(data.rowConnectionCounts[1]!, data, "A", "B")).toBe(0);
+    expect(data.rowWindowProvenance?.[1]).toEqual({
+      responseRowIndex: 1,
+      horizon: "a::b::c",
+      previousRowIndex: null,
+      priorRowCount: 0
+    });
+    expect(expandOrderedPriorRowIndices(data.rowWindowProvenance ?? [], 1)).toEqual([]);
+  });
+
+  it("keeps numeric and string horizon values in separate ordered contexts", () => {
+    const data = accumulateData(orderedOptions([
+      { unit: "u1", horizon: 1, A: 1, B: 0 },
+      { unit: "u1", horizon: "1", A: 0, B: 1 }
+    ], { windowSizeBack: 2 }));
+
+    expect(edgeValue(data.rowConnectionCounts[1]!, data, "A", "B")).toBe(0);
+    expect(data.rowWindowProvenance?.[1]).toEqual({
+      responseRowIndex: 1,
+      horizon: "1",
+      previousRowIndex: null,
+      priorRowCount: 0
+    });
+    expect(expandOrderedPriorRowIndices(data.rowWindowProvenance ?? [], 1)).toEqual([]);
+  });
+
   it("attributes a response-row contribution to its analytic unit across a shared horizon", () => {
     const data = accumulateData(orderedOptions([
       { unit: "ground-unit", horizon: "shared", A: 1, B: 0 },
@@ -177,7 +213,7 @@ describe("ordered network accumulation", () => {
     expect(edgeValue(sameRow.rowConnectionCounts[0]!, sameRow, "B", "A")).toBe(3);
   });
 
-  it("records the actual prior global row indices used for each ordered response", () => {
+  it("records a compact predecessor chain that expands to the exact finite window", () => {
     const data = accumulateData(orderedOptions([
       { unit: "u1", horizon: "h1", A: 1, B: 0 },
       { unit: "u2", horizon: "h2", A: 0, B: 1 },
@@ -186,11 +222,13 @@ describe("ordered network accumulation", () => {
     ], { windowSizeBack: 2 }));
 
     expect(data.rowWindowProvenance).toEqual([
-      { responseRowIndex: 0, horizon: "h1", priorRowIndices: [] },
-      { responseRowIndex: 1, horizon: "h2", priorRowIndices: [] },
-      { responseRowIndex: 2, horizon: "h1", priorRowIndices: [0] },
-      { responseRowIndex: 3, horizon: "h1", priorRowIndices: [2] }
+      { responseRowIndex: 0, horizon: "h1", previousRowIndex: null, priorRowCount: 0 },
+      { responseRowIndex: 1, horizon: "h2", previousRowIndex: null, priorRowCount: 0 },
+      { responseRowIndex: 2, horizon: "h1", previousRowIndex: 0, priorRowCount: 1 },
+      { responseRowIndex: 3, horizon: "h1", previousRowIndex: 2, priorRowCount: 1 }
     ]);
+    expect(expandOrderedPriorRowIndices(data.rowWindowProvenance ?? [], 2)).toEqual([0]);
+    expect(expandOrderedPriorRowIndices(data.rowWindowProvenance ?? [], 3)).toEqual([2]);
   });
 });
 
@@ -231,6 +269,41 @@ describe("ordered network validation", () => {
     expect(() => accumulateData({ ...orderedOptions(rows), networkType: "ona" as never }))
       .toThrowError('networkType must be one of standard, ordered; got "ona".');
   });
+
+  it("rejects ordered headers that collide before asymmetric mass can be overwritten", () => {
+    const ambiguousCodes = ["A", "A & A"];
+    const asymmetricRows: Row[] = [
+      { unit: "u1", horizon: "h1", A: 0, "A & A": 1 },
+      { unit: "u1", horizon: "h1", A: 1, "A & A": 0 }
+    ];
+
+    expect(() => accumulateData(orderedOptions(asymmetricRows, {
+      codes: ambiguousCodes,
+      windowSizeBack: 2
+    }))).toThrowError(
+      'Ordered adjacency headers collide; use unambiguous code labels so every "<ground> & <response>" header is unique.'
+    );
+  });
+
+  it("rejects duplicate code labels", () => {
+    expect(() => accumulateData(orderedOptions([
+      { unit: "u1", horizon: "h1", A: 1, B: 0 }
+    ], { codes: ["A", "A"] }))).toThrowError('codes must contain unique column labels; duplicate "A".');
+  });
+
+  it("rejects distinct composite unit tuples with the same legacy display label", () => {
+    const collidingUnits: Row[] = [
+      { u1: "a::b", u2: "c", horizon: "h1", A: 1, B: 0 },
+      { u1: "a", u2: "b::c", horizon: "h1", A: 0, B: 1 }
+    ];
+
+    expect(() => accumulateData(orderedOptions(collidingUnits, {
+      units: ["u1", "u2"],
+      windowSizeBack: 2
+    }))).toThrowError(
+      'Ordered network analysis unit label collision: distinct typed unit tuples format as "a::b::c"; use unambiguous unit values or columns.'
+    );
+  });
 });
 
 describe("ordered network streaming and downstream modeling", () => {
@@ -266,12 +339,56 @@ describe("ordered network streaming and downstream modeling", () => {
     expect(data.rawRows).toEqual([]);
     expect(data.rowConnectionCounts).toEqual([]);
     expect(data.rowWindowProvenance).toEqual([
-      { responseRowIndex: 0, horizon: "h1", priorRowIndices: [] },
-      { responseRowIndex: 1, horizon: "h1", priorRowIndices: [0] },
-      { responseRowIndex: 2, horizon: "h1", priorRowIndices: [0, 1] },
-      { responseRowIndex: 3, horizon: "h2", priorRowIndices: [] },
-      { responseRowIndex: 4, horizon: "h2", priorRowIndices: [3] }
+      { responseRowIndex: 0, horizon: "h1", previousRowIndex: null, priorRowCount: 0 },
+      { responseRowIndex: 1, horizon: "h1", previousRowIndex: 0, priorRowCount: 1 },
+      { responseRowIndex: 2, horizon: "h1", previousRowIndex: 1, priorRowCount: 2 },
+      { responseRowIndex: 3, horizon: "h2", previousRowIndex: null, priorRowCount: 0 },
+      { responseRowIndex: 4, horizon: "h2", previousRowIndex: 3, priorRowCount: 1 }
     ]);
+    expect(expandOrderedPriorRowIndices(data.rowWindowProvenance ?? [], 2)).toEqual([0, 1]);
+  });
+
+  it("keeps a 2000-row Infinity window linear and expands exact provenance on demand", () => {
+    const rowCount = 2_000;
+    const longRows: Row[] = Array.from({ length: rowCount }, (_unused, index) => ({
+      unit: "u1",
+      horizon: "long",
+      A: 1,
+      B: 0,
+      row: index
+    }));
+    const stream = createAccumulationStream({
+      units: ["unit"],
+      conversation: ["horizon"],
+      codes,
+      networkType: "ordered",
+      windowSizeBack: Number.POSITIVE_INFINITY,
+      materialization: "model",
+      expectedRows: rowCount
+    });
+    for (let index = 0; index < rowCount; index += 100) {
+      stream.push(longRows.slice(index, index + 100));
+    }
+    const data = stream.finish();
+    const provenance = data.rowWindowProvenance ?? [];
+    const finalEntry = provenance[rowCount - 1];
+
+    expect(provenance).toHaveLength(rowCount);
+    expect(finalEntry).toEqual({
+      responseRowIndex: rowCount - 1,
+      horizon: "long",
+      previousRowIndex: rowCount - 2,
+      priorRowCount: rowCount - 1
+    });
+    expect(Object.hasOwn(finalEntry ?? {}, "priorRowIndices")).toBe(false);
+    expect(JSON.stringify(provenance).length).toBeLessThan(rowCount * 120);
+    expect(stream.state.activeBufferedRowsPeak).toBeLessThanOrEqual(1);
+    expect(stream.state.activeBufferedRows).toBe(0);
+    const expanded = expandOrderedPriorRowIndices(provenance, rowCount - 1);
+    expect(expanded).toHaveLength(rowCount - 1);
+    expect(expanded[0]).toBe(0);
+    expect(expanded.at(-1)).toBe(rowCount - 2);
+    expect(edgeValue(data.connectionCounts[0]!, data, "A", "A")).toBe(rowCount * (rowCount - 1) / 2);
   });
 
   it("makes an ordered set with directed node positions by default", () => {

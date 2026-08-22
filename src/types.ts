@@ -94,8 +94,10 @@ export interface OrderedWindowProvenance {
   responseRowIndex: number;
   /** Merged conversation-column value defining the response row's horizon. */
   horizon: string;
-  /** Zero-based input rows used as prior context, oldest to newest. */
-  priorRowIndices: number[];
+  /** Previous response row in the same typed horizon, or null at its boundary. */
+  previousRowIndex: number | null;
+  /** Number of predecessor rows actually included in this response's window. */
+  priorRowCount: number;
 }
 
 export interface ENAData {
