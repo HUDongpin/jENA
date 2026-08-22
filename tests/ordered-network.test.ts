@@ -795,6 +795,43 @@ describe("ordered network streaming and downstream modeling", () => {
     );
   });
 
+  it("rejects same-row positive operands whose ordered contribution underflows to zero", () => {
+    expect(() => accumulateData(orderedOptions([
+      { unit: "u1", horizon: "h1", A: 1e-200, B: 1e-200 }
+    ]))).toThrowError(
+      /Ordered network analysis numeric underflow at edge index 1 \(B -> A\): positive same-row operands 1e-200 and 1e-200 produced 0\./
+    );
+  });
+
+  it("rejects prior-response positive operands whose ordered contribution underflows to zero", () => {
+    expect(() => accumulateData(orderedOptions([
+      { unit: "u1", horizon: "h1", A: 1e-200, B: 0 },
+      { unit: "u1", horizon: "h1", A: 0, B: 1e-200 }
+    ], { windowSizeBack: 2 }))).toThrowError(
+      /Ordered network analysis numeric underflow at edge index 2 \(A -> B\): positive lagged operands 1e-200 and 1e-200 produced 0\./
+    );
+  });
+
+  it("keeps representable tiny-normal products and accepts true zero operands", () => {
+    const data = accumulateData(orderedOptions([
+      { unit: "u1", horizon: "h1", A: 1e-200, B: 1 },
+      { unit: "u2", horizon: "h2", A: 1e-200, B: 0 },
+      { unit: "u2", horizon: "h2", A: 0, B: 1 },
+      { unit: "u3", horizon: "h3", A: 1, B: 0 },
+      { unit: "u3", horizon: "h3", A: 0, B: 1e-200 },
+      { unit: "u4", horizon: "h4", A: 0, B: 1e-200 },
+      { unit: "u5", horizon: "h5", A: 0, B: 0 },
+      { unit: "u5", horizon: "h5", A: 0, B: 1e-200 }
+    ], { windowSizeBack: 2 }));
+
+    expect(edgeValue(data.connectionCounts[0]!, data, "A", "B")).toBe(5e-201);
+    expect(edgeValue(data.connectionCounts[0]!, data, "B", "A")).toBe(5e-201);
+    expect(edgeValue(data.connectionCounts[1]!, data, "A", "B")).toBe(1e-200);
+    expect(edgeValue(data.connectionCounts[2]!, data, "A", "B")).toBe(1e-200);
+    expect(data.connectionMatrix[3]).toEqual([0, 0, 0, 0]);
+    expect(data.connectionMatrix[4]).toEqual([0, 0, 0, 0]);
+  });
+
   it("rejects an explicitly undirected node-position solver for ordered data", () => {
     expect(() => ena({ ...options, nodePositionMethod: "undirected" }))
       .toThrowError('Ordered network analysis requires a directed node position method; got "undirected". Omit nodePositionMethod to use "directed".');

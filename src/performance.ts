@@ -664,16 +664,58 @@ function makeNoForwardCoOccurrence(state: MovingConversationState, entry: Stream
   return coOccurrenceFromSums(addVectors(previous, entry.codeValues), previous, binary);
 }
 
-function orderedConnections(prior: number[], response: number[]): number[] {
+function assertOrderedProductDidNotUnderflow(
+  left: number,
+  right: number,
+  product: number,
+  edgeIndex: number,
+  ground: string,
+  response: string,
+  contribution: 'lagged' | 'same-row'
+): void {
+  if (left > 0 && right > 0 && product === 0) {
+    throw new Error(
+      `Ordered network analysis numeric underflow at edge index ${edgeIndex} (${ground} -> ${response}): ` +
+      `positive ${contribution} operands ${String(left)} and ${String(right)} produced 0.`
+    );
+  }
+}
+
+function orderedConnections(prior: number[], response: number[], codes: string[]): number[] {
   const width = response.length;
   const connections = zeros(width * width);
   for (let responseIndex = 0; responseIndex < width; responseIndex += 1) {
     for (let groundIndex = 0; groundIndex < width; groundIndex += 1) {
       const edgeIndex = responseIndex * width + groundIndex;
-      const lagged = (prior[groundIndex] ?? 0) * (response[responseIndex] ?? 0);
-      const sameRow = groundIndex === responseIndex
-        ? 0
-        : 0.5 * (response[groundIndex] ?? 0) * (response[responseIndex] ?? 0);
+      const ground = codes[groundIndex] ?? String(groundIndex);
+      const responseCode = codes[responseIndex] ?? String(responseIndex);
+      const priorGround = prior[groundIndex] ?? 0;
+      const currentResponse = response[responseIndex] ?? 0;
+      const lagged = priorGround * currentResponse;
+      assertOrderedProductDidNotUnderflow(
+        priorGround,
+        currentResponse,
+        lagged,
+        edgeIndex,
+        ground,
+        responseCode,
+        'lagged'
+      );
+
+      let sameRow = 0;
+      if (groundIndex !== responseIndex) {
+        const currentGround = response[groundIndex] ?? 0;
+        sameRow = 0.5 * currentGround * currentResponse;
+        assertOrderedProductDidNotUnderflow(
+          currentGround,
+          currentResponse,
+          sameRow,
+          edgeIndex,
+          ground,
+          responseCode,
+          'same-row'
+        );
+      }
       connections[edgeIndex] = lagged + sameRow;
     }
   }
@@ -691,7 +733,7 @@ function makeOrderedNoForwardConnections(
   const priorRowCount = Number.isFinite(priorLimit)
     ? state.orderedHistorySize
     : state.rowsSeen - 1;
-  const connections = orderedConnections(state.orderedRunningSum, entry.codeValues);
+  const connections = orderedConnections(state.orderedRunningSum, entry.codeValues, internals.codes);
 
   internals.rowWindowProvenance.push({
     responseRowIndex: entry.globalIndex,
