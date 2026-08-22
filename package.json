@@ -1,6 +1,6 @@
 {
   "name": "jena-js",
-  "version": "0.6.3",
+  "version": "0.7.0-ona.0",
   "description": "Standalone TypeScript/JavaScript library for Epistemic Network Analysis, ported from rENA for browser and Node runtimes.",
   "type": "module",
   "license": "GPL-3.0-only",

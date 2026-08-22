@@ -35,6 +35,46 @@ The zip is not committed to this repository (19 MB); unpack it to `reference/rEN
 
 Modifications and the TypeScript translation are © the jena-js contributors, distributed under GPL-3.0-only (see LICENSE).
 
+## Ordered Network Analysis extension (2026-08-22)
+
+The ordered-network behavior added for the `0.7.0-ona.0` prerelease is an
+independent TypeScript implementation of the mathematical and behavioral
+semantics observed in the official ONA context and verified against an R
+oracle. It is not represented as a line-by-line port of the ONA R source. The
+existing rENA-derived standard ENA files and attribution in the table above
+remain unchanged.
+
+The local R context used for ordered parity reported these package versions:
+
+- `ona` 0.1.2.9003
+- `tma` 0.3.2.9002
+- `rENA` 0.4.2.9003
+
+The canonical parity case used the following local-only oracle inputs. These
+absolute paths describe the verification environment; neither the workbook nor
+the generated CSV is distributed in the npm tarball.
+
+| Oracle artifact | Local path | SHA-256 |
+|---|---|---|
+| Yu coded workbook | `/Volumes/Starship/ONA/Yu_ena_coded_data_0712.xlsx` | `f2132f8dc3e147609169472594a2031130be23eab4a2ac0fb9adcb6d9d667042` |
+| R ordered connection-count golden | `/Volumes/Starship/ONA/ona_output/yu_within_student/ona_connection_counts.csv` | `b4c0a6921ece7df51d846b3864e239747062da304a212aa0e2402d4a85074253` |
+
+The oracle harness pre-sorted input rows by `Lesson` and used `Group + Name` as
+both analytic unit and ordered horizon; the jENA accumulator itself did not
+perform that sort. The TypeScript result matched the R oracle's 87 unit
+networks and 49 directed connection columns exactly: total raw connection mass
+811, three zero networks, zero cell mismatches, and maximum numeric error 0.
+This oracle validates ordered connection counts and schema/order for that
+configuration; it does not by itself establish parity for every downstream
+visualization or workflow.
+
+The ordered extension, all modifications, and the corresponding source remain
+under **GPL-3.0-only**. Before any public tag, npm publication, bundled product
+release, or source distribution, the release owner must recheck corresponding
+source availability, retained license/attribution notices, and the applicable
+legal/license posture. Passing the numerical oracle and package tests is not a
+substitute for that release gate.
+
 ## Source History
 
 - The project descends from a local jENA template created for a browser/Node port of rENA.

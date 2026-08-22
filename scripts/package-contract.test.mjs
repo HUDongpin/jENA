@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { assertZeroRuntimeDependencyContract } from "./package-contract.mjs";
 
 const PACKAGE_NAME = "jena-js";
-const PACKAGE_VERSION = "0.6.3";
+const PACKAGE_VERSION = "0.7.0-ona.0";
 const OBJECT_DEPENDENCY_FIELDS = ["dependencies", "optionalDependencies", "peerDependencies"];
 const BUNDLE_DEPENDENCY_FIELDS = ["bundleDependencies", "bundledDependencies"];
+const PROJECT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 function validPackage() {
   return { name: PACKAGE_NAME, version: PACKAGE_VERSION };
@@ -22,6 +26,15 @@ function validLock() {
     },
   };
 }
+
+test("repository manifest and lock carry the ordered prerelease identity", () => {
+  const pkg = JSON.parse(readFileSync(join(PROJECT_DIR, "package.json"), "utf8"));
+  const lock = JSON.parse(readFileSync(join(PROJECT_DIR, "package-lock.json"), "utf8"));
+
+  assert.equal(pkg.name, PACKAGE_NAME);
+  assert.equal(pkg.version, PACKAGE_VERSION);
+  assert.doesNotThrow(() => assertZeroRuntimeDependencyContract(pkg, lock));
+});
 
 test("accepts a matching zero-runtime package and lock root", () => {
   assert.doesNotThrow(() => assertZeroRuntimeDependencyContract(validPackage(), validLock()));

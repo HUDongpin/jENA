@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.7.0-ona.0 (unpublished prerelease) - 2026-08-22
+
+This prerelease exists only in the local source branch. It has not been tagged
+or published to npm.
+
+### Added: ordered network API
+
+- Added the opt-in `networkType: "ordered"` accumulation mode. Omitting
+  `networkType` still selects `"standard"`; the standard ENA numerical path,
+  defaults, and rENA golden outputs are unchanged.
+- Added a full directed `p²` adjacency, including diagonal cells. Entries use
+  ground/source as matrix row, response/target as matrix column, and
+  column-major flattening (`responseIndex * p + groundIndex`). Public
+  `adjacencyKey` entries carry explicit source/target labels and indices.
+- Added public ordered provenance through `OrderedWindowProvenance`,
+  `ENAData.rowWindowProvenance`, and
+  `expandOrderedPriorRowIndices(provenance, responseRowIndex)`. The compact
+  predecessor chain remains present in model-only materialization without
+  retaining raw rows or per-row connection tables.
+- Added `orderedAdjacencyKey` and `validateENADataNetworkContract` to the stable
+  root surface, plus the public `NetworkType` and optional `networkType` fields
+  on accumulation/data/function-parameter contracts.
+- Ordered `makeSet()` now selects the directed node-position solver by default.
+  The solver's incident weights count a self-loop once and a non-self edge at
+  both endpoints.
+
+### Scientific contract
+
+- Each response row receives prior-ground × current-response products and half
+  of every off-diagonal same-row product in both directions. Same-row diagonal
+  mass is excluded; repeated codes across rows produce self-loops.
+- Ordered accumulation preserves raw code counts and therefore defaults to
+  `weightBy: "sum"`. A directional `p x p` mask is interpreted as
+  `mask[ground/source][response/target]`, diagonal included.
+- `windowSizeBack` is the total stanza width: the current row plus at most
+  `N - 1` prior rows in the same typed horizon. Distinct typed horizons never
+  share context; interleaved rows continue their own horizon chains in caller-
+  supplied input order. Each connection contribution belongs to its response
+  row's analytic unit.
+- The canonical Yu oracle matched all 87 unit rows × 49 directed dimensions,
+  total connection mass 811, and three zero networks with zero differing
+  cells. Oracle versions and hashes are recorded in PROVENANCE.md.
+
+### Validation, lifecycle, and performance
+
+- Ordered analysis fails closed outside the endpoint, backward-only moving
+  window, raw-sum contract. Conversation and trajectory models, forward
+  windows, binary/custom weighting, undirected node positions, and the paired
+  ground/response solver are rejected.
+- Runtime `ENAData` validation now checks network/model/function-parameter
+  agreement, exact ordered headers/key order, and all `p²` widths and
+  count/matrix values before `makeSet()` or `projectIn()` models data. The
+  provenance expansion helper separately validates a persisted compact chain
+  before reading it. Duplicate codes, colliding ordered display headers, and
+  ambiguous unit display labels fail closed; delimiter- and type-colliding
+  horizon displays remain separate through collision-free typed identities.
+- Ordered finite windows use bounded removable history, while infinite windows
+  use running sums. Both store O(rows) compact provenance rather than copying
+  prior-row arrays. Batch, chunked, and manual streaming output is identical;
+  finished streams release active histories and reject further use.
+
+### Public compatibility note
+
+- This prerelease adds public discriminants, fields, and helpers listed above;
+  consumers that exhaustively switch over public unions or assert exact object
+  shapes must handle the new ordered values and optional provenance fields.
+  There is no breaking change to ordinary standard ENA calls.
+- ONA-specific 3D/trajectory rendering, forward ONA, paired models,
+  reference-set workflows, and TMA workflows are not claimed by this package
+  prerelease and require separate application-level validation.
+
 ## 0.6.3 - 2026-08-21
 
 - Removed the accidental `jena-js@^0.6.0` self-dependency from both the
