@@ -6,7 +6,7 @@ import {
   ena,
   expandOrderedPriorRowIndices
 } from "../src/index.js";
-import type { AccumulateOptions, ENAData, Row } from "../src/index.js";
+import type { AccumulateOptions, ENAData, OrderedWindowProvenance, Row } from "../src/index.js";
 
 const codes = ["A", "B"];
 
@@ -29,6 +29,17 @@ function edgeColumn(data: ENAData, ground: string, response: string): string {
 
 function edgeValue(row: Row, data: ENAData, ground: string, response: string): number {
   return Number(row[edgeColumn(data, ground, response)] ?? 0);
+}
+
+function provenanceEntry(overrides: Partial<OrderedWindowProvenance> = {}): OrderedWindowProvenance {
+  return {
+    responseRowIndex: 0,
+    horizon: "h1",
+    horizonIdentity: "typed-h1",
+    previousRowIndex: null,
+    priorRowCount: 0,
+    ...overrides
+  };
 }
 
 describe("ordered network accumulation", () => {
@@ -135,13 +146,31 @@ describe("ordered network accumulation", () => {
     }));
 
     expect(edgeValue(data.rowConnectionCounts[1]!, data, "A", "B")).toBe(0);
-    expect(data.rowWindowProvenance?.[1]).toEqual({
+    expect(data.rowWindowProvenance?.[1]).toEqual(expect.objectContaining({
       responseRowIndex: 1,
       horizon: "a::b::c",
       previousRowIndex: null,
       priorRowCount: 0
-    });
+    }));
     expect(expandOrderedPriorRowIndices(data.rowWindowProvenance ?? [], 1)).toEqual([]);
+  });
+
+  it("persists a collision-free horizon identity alongside the display label", () => {
+    const data = accumulateData(orderedOptions([
+      { unit: "u1", h1: "a::b", h2: "c", A: 1, B: 0 },
+      { unit: "u1", h1: "a", h2: "b::c", A: 0, B: 1 }
+    ], {
+      conversation: ["h1", "h2"],
+      windowSizeBack: 2
+    }));
+    const first = data.rowWindowProvenance?.[0];
+    const second = data.rowWindowProvenance?.[1];
+
+    expect(first?.horizon).toBe("a::b::c");
+    expect(second?.horizon).toBe("a::b::c");
+    expect(Reflect.get(first ?? {}, "horizonIdentity")).toBeTypeOf("string");
+    expect(Reflect.get(first ?? {}, "horizonIdentity"))
+      .not.toBe(Reflect.get(second ?? {}, "horizonIdentity"));
   });
 
   it("keeps numeric and string horizon values in separate ordered contexts", () => {
@@ -151,12 +180,12 @@ describe("ordered network accumulation", () => {
     ], { windowSizeBack: 2 }));
 
     expect(edgeValue(data.rowConnectionCounts[1]!, data, "A", "B")).toBe(0);
-    expect(data.rowWindowProvenance?.[1]).toEqual({
+    expect(data.rowWindowProvenance?.[1]).toEqual(expect.objectContaining({
       responseRowIndex: 1,
       horizon: "1",
       previousRowIndex: null,
       priorRowCount: 0
-    });
+    }));
     expect(expandOrderedPriorRowIndices(data.rowWindowProvenance ?? [], 1)).toEqual([]);
   });
 
@@ -222,10 +251,10 @@ describe("ordered network accumulation", () => {
     ], { windowSizeBack: 2 }));
 
     expect(data.rowWindowProvenance).toEqual([
-      { responseRowIndex: 0, horizon: "h1", previousRowIndex: null, priorRowCount: 0 },
-      { responseRowIndex: 1, horizon: "h2", previousRowIndex: null, priorRowCount: 0 },
-      { responseRowIndex: 2, horizon: "h1", previousRowIndex: 0, priorRowCount: 1 },
-      { responseRowIndex: 3, horizon: "h1", previousRowIndex: 2, priorRowCount: 1 }
+      expect.objectContaining({ responseRowIndex: 0, horizon: "h1", previousRowIndex: null, priorRowCount: 0 }),
+      expect.objectContaining({ responseRowIndex: 1, horizon: "h2", previousRowIndex: null, priorRowCount: 0 }),
+      expect.objectContaining({ responseRowIndex: 2, horizon: "h1", previousRowIndex: 0, priorRowCount: 1 }),
+      expect.objectContaining({ responseRowIndex: 3, horizon: "h1", previousRowIndex: 2, priorRowCount: 1 })
     ]);
     expect(expandOrderedPriorRowIndices(data.rowWindowProvenance ?? [], 2)).toEqual([0]);
     expect(expandOrderedPriorRowIndices(data.rowWindowProvenance ?? [], 3)).toEqual([2]);
@@ -306,6 +335,284 @@ describe("ordered network validation", () => {
   });
 });
 
+describe("ordered window provenance validation", () => {
+  it("rejects a non-array persisted provenance container", () => {
+    expect(() => expandOrderedPriorRowIndices(null as never, 0)).toThrowError(
+      "Ordered window provenance must be an array."
+    );
+  });
+
+  it("rejects a non-object persisted provenance entry", () => {
+    const persisted = [null as never];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 0)).toThrowError(
+      "Ordered window provenance entry must be an object; got null."
+    );
+  });
+
+  it("rejects a persisted negative response row index", () => {
+    const persisted = [
+      provenanceEntry({ responseRowIndex: -1 }),
+      provenanceEntry({ responseRowIndex: 0 })
+    ];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 0)).toThrowError(
+      "Ordered window provenance responseRowIndex must be a non-negative integer; got -1."
+    );
+  });
+
+  it("rejects a persisted fractional response row index", () => {
+    const persisted = [
+      provenanceEntry({ responseRowIndex: 0.5 }),
+      provenanceEntry({ responseRowIndex: 0 })
+    ];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 0)).toThrowError(
+      "Ordered window provenance responseRowIndex must be a non-negative integer; got 0.5."
+    );
+  });
+
+  it("rejects a persisted response row index outside JavaScript's safe integer range", () => {
+    const unsafeIndex = Number.MAX_SAFE_INTEGER + 1;
+    const persisted = [provenanceEntry({ responseRowIndex: unsafeIndex })];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, unsafeIndex)).toThrowError(
+      `responseRowIndex must be a non-negative integer; got ${unsafeIndex}.`
+    );
+  });
+
+  it("rejects a persisted negative prior row count", () => {
+    const persisted = [provenanceEntry({ priorRowCount: -1 })];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 0)).toThrowError(
+      "Ordered window provenance priorRowCount for response row 0 must be a non-negative integer; got -1."
+    );
+  });
+
+  it("rejects a persisted fractional prior row count", () => {
+    const persisted = [provenanceEntry({ priorRowCount: 0.5 })];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 0)).toThrowError(
+      "Ordered window provenance priorRowCount for response row 0 must be a non-negative integer; got 0.5."
+    );
+  });
+
+  it("rejects a persisted negative previous row index", () => {
+    const persisted = [provenanceEntry({ previousRowIndex: -1 })];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 0)).toThrowError(
+      "Ordered window provenance previousRowIndex for response row 0 must be null or a non-negative integer; got -1."
+    );
+  });
+
+  it("rejects a persisted fractional previous row index", () => {
+    const persisted = [provenanceEntry({ previousRowIndex: 0.5 })];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 0)).toThrowError(
+      "Ordered window provenance previousRowIndex for response row 0 must be null or a non-negative integer; got 0.5."
+    );
+  });
+
+  it("rejects a self predecessor", () => {
+    const persisted = [provenanceEntry({ responseRowIndex: 1, previousRowIndex: 1 })];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 1)).toThrowError(
+      "Ordered window provenance previousRowIndex for response row 1 must be strictly less than responseRowIndex; got 1."
+    );
+  });
+
+  it("rejects a future predecessor", () => {
+    const persisted = [
+      provenanceEntry({ responseRowIndex: 1, previousRowIndex: 2 }),
+      provenanceEntry({ responseRowIndex: 2 })
+    ];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 1)).toThrowError(
+      "Ordered window provenance previousRowIndex for response row 1 must be strictly less than responseRowIndex; got 2."
+    );
+  });
+
+  it("rejects a persisted entry missing horizonIdentity", () => {
+    const { horizonIdentity: _omitted, ...missingIdentity } = provenanceEntry();
+    const persisted = [missingIdentity as OrderedWindowProvenance];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 0)).toThrowError(
+      "Ordered window provenance horizonIdentity for response row 0 must be a non-empty string; got undefined."
+    );
+  });
+
+  it("rejects a persisted entry missing its horizon display label", () => {
+    const { horizon: _omitted, ...missingHorizon } = provenanceEntry();
+    const persisted = [missingHorizon as OrderedWindowProvenance];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 0)).toThrowError(
+      "Ordered window provenance horizon for response row 0 must be a string; got undefined."
+    );
+  });
+
+  it("rejects a predecessor from another typed horizon", () => {
+    const persisted = [
+      provenanceEntry({ responseRowIndex: 0, horizonIdentity: "typed-h1" }),
+      provenanceEntry({
+        responseRowIndex: 1,
+        horizon: "same-display",
+        horizonIdentity: "typed-h2",
+        previousRowIndex: 0,
+        priorRowCount: 1
+      })
+    ];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 1)).toThrowError(
+      "Ordered window provenance for response row 1 crosses horizonIdentity at predecessor row 0."
+    );
+  });
+
+  it("rejects different horizon displays assigned to the same typed identity", () => {
+    const persisted = [
+      provenanceEntry({ responseRowIndex: 0, horizon: "display-one" }),
+      provenanceEntry({
+        responseRowIndex: 1,
+        horizon: "display-two",
+        previousRowIndex: 0,
+        priorRowCount: 1
+      })
+    ];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 1)).toThrowError(
+      'Ordered window provenance horizonIdentity "typed-h1" has inconsistent horizon displays: "display-one" and "display-two".'
+    );
+  });
+
+  it("rejects a missing persisted predecessor even when the current window count is zero", () => {
+    const persisted = [provenanceEntry({
+      responseRowIndex: 1,
+      previousRowIndex: 0,
+      priorRowCount: 0
+    })];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 1)).toThrowError(
+      "Ordered window provenance is missing predecessor row 0 for response row 1."
+    );
+  });
+
+  it("rejects a persisted predecessor cycle", () => {
+    const persisted = [
+      provenanceEntry({ responseRowIndex: 0, previousRowIndex: 1 }),
+      provenanceEntry({ responseRowIndex: 1, previousRowIndex: 0, priorRowCount: 1 })
+    ];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 1)).toThrowError(
+      "Ordered window provenance contains a predecessor cycle involving response row 0."
+    );
+  });
+
+  it("rejects a prior row count inconsistent with its predecessor chain", () => {
+    const persisted = [
+      provenanceEntry({ responseRowIndex: 0, priorRowCount: 0 }),
+      provenanceEntry({ responseRowIndex: 1, previousRowIndex: 0, priorRowCount: 1 }),
+      provenanceEntry({ responseRowIndex: 2, previousRowIndex: 1, priorRowCount: 0 })
+    ];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 2)).toThrowError(
+      "Ordered window provenance priorRowCount for response row 2 must equal its predecessor count or increase by one; " +
+      "predecessor row 1 has 1, got 0."
+    );
+  });
+
+  it("rejects a chain root that claims prior rows even when expanding another response", () => {
+    const persisted = [
+      provenanceEntry({ responseRowIndex: 0, priorRowCount: 1 }),
+      provenanceEntry({ responseRowIndex: 2, horizonIdentity: "typed-h2" })
+    ];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 2)).toThrowError(
+      "Ordered window provenance priorRowCount for response row 0 must be 0 when previousRowIndex is null; got 1."
+    );
+  });
+
+  it("rejects a chain that skips the immediate predecessor in the same typed horizon", () => {
+    const persisted = [
+      provenanceEntry({ responseRowIndex: 0 }),
+      provenanceEntry({ responseRowIndex: 1, previousRowIndex: 0, priorRowCount: 1 }),
+      provenanceEntry({ responseRowIndex: 2, previousRowIndex: 0, priorRowCount: 1 })
+    ];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 2)).toThrowError(
+      "Ordered window provenance previousRowIndex for response row 2 must reference the immediately preceding response row " +
+      "in its horizonIdentity; expected 1, got 0."
+    );
+  });
+
+  it("rejects a prior-row count that grows after reaching its fixed-window plateau", () => {
+    const persisted = [
+      provenanceEntry({ responseRowIndex: 0 }),
+      provenanceEntry({ responseRowIndex: 1, previousRowIndex: 0, priorRowCount: 0 }),
+      provenanceEntry({ responseRowIndex: 2, previousRowIndex: 1, priorRowCount: 1 })
+    ];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 2)).toThrowError(
+      "Ordered window provenance priorRowCount for response row 2 cannot increase after its horizon chain reached " +
+      "the fixed-window plateau 0; got 1."
+    );
+  });
+
+  it("rejects different fixed-window plateaus across typed horizons", () => {
+    const persisted = [
+      provenanceEntry({ responseRowIndex: 0, horizon: "h1", horizonIdentity: "typed-h1" }),
+      provenanceEntry({
+        responseRowIndex: 1,
+        horizon: "h1",
+        horizonIdentity: "typed-h1",
+        previousRowIndex: 0,
+        priorRowCount: 0
+      }),
+      provenanceEntry({
+        responseRowIndex: 2,
+        horizon: "h1",
+        horizonIdentity: "typed-h1",
+        previousRowIndex: 1,
+        priorRowCount: 0
+      }),
+      provenanceEntry({ responseRowIndex: 3, horizon: "h2", horizonIdentity: "typed-h2" }),
+      provenanceEntry({
+        responseRowIndex: 4,
+        horizon: "h2",
+        horizonIdentity: "typed-h2",
+        previousRowIndex: 3,
+        priorRowCount: 1
+      }),
+      provenanceEntry({
+        responseRowIndex: 5,
+        horizon: "h2",
+        horizonIdentity: "typed-h2",
+        previousRowIndex: 4,
+        priorRowCount: 1
+      })
+    ];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 5)).toThrowError(
+      "Ordered window provenance priorRowCount for response row 1 is inconsistent with one global fixed window: " +
+      "expected 1 at horizon position 1 with observed prior-row limit 1, got 0."
+    );
+  });
+
+  it("rejects an invalid persisted previous row index type", () => {
+    const persisted = [provenanceEntry({ previousRowIndex: "zero" as never })];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 0)).toThrowError(
+      "Ordered window provenance previousRowIndex for response row 0 must be null or a non-negative integer; got zero."
+    );
+  });
+
+  it("rejects a duplicate persisted response row index", () => {
+    const persisted = [provenanceEntry(), provenanceEntry()];
+
+    expect(() => expandOrderedPriorRowIndices(persisted, 0)).toThrowError(
+      "Ordered window provenance contains duplicate responseRowIndex 0."
+    );
+  });
+});
+
 describe("ordered network streaming and downstream modeling", () => {
   const rows: Row[] = [
     { unit: "u1", horizon: "h1", A: 2, B: 0, C: 0 },
@@ -339,11 +646,11 @@ describe("ordered network streaming and downstream modeling", () => {
     expect(data.rawRows).toEqual([]);
     expect(data.rowConnectionCounts).toEqual([]);
     expect(data.rowWindowProvenance).toEqual([
-      { responseRowIndex: 0, horizon: "h1", previousRowIndex: null, priorRowCount: 0 },
-      { responseRowIndex: 1, horizon: "h1", previousRowIndex: 0, priorRowCount: 1 },
-      { responseRowIndex: 2, horizon: "h1", previousRowIndex: 1, priorRowCount: 2 },
-      { responseRowIndex: 3, horizon: "h2", previousRowIndex: null, priorRowCount: 0 },
-      { responseRowIndex: 4, horizon: "h2", previousRowIndex: 3, priorRowCount: 1 }
+      expect.objectContaining({ responseRowIndex: 0, horizon: "h1", previousRowIndex: null, priorRowCount: 0 }),
+      expect.objectContaining({ responseRowIndex: 1, horizon: "h1", previousRowIndex: 0, priorRowCount: 1 }),
+      expect.objectContaining({ responseRowIndex: 2, horizon: "h1", previousRowIndex: 1, priorRowCount: 2 }),
+      expect.objectContaining({ responseRowIndex: 3, horizon: "h2", previousRowIndex: null, priorRowCount: 0 }),
+      expect.objectContaining({ responseRowIndex: 4, horizon: "h2", previousRowIndex: 3, priorRowCount: 1 })
     ]);
     expect(expandOrderedPriorRowIndices(data.rowWindowProvenance ?? [], 2)).toEqual([0, 1]);
   });
@@ -374,14 +681,14 @@ describe("ordered network streaming and downstream modeling", () => {
     const finalEntry = provenance[rowCount - 1];
 
     expect(provenance).toHaveLength(rowCount);
-    expect(finalEntry).toEqual({
+    expect(finalEntry).toEqual(expect.objectContaining({
       responseRowIndex: rowCount - 1,
       horizon: "long",
       previousRowIndex: rowCount - 2,
       priorRowCount: rowCount - 1
-    });
+    }));
     expect(Object.hasOwn(finalEntry ?? {}, "priorRowIndices")).toBe(false);
-    expect(JSON.stringify(provenance).length).toBeLessThan(rowCount * 120);
+    expect(JSON.stringify(provenance).length).toBeLessThan(rowCount * 160);
     expect(stream.state.activeBufferedRowsPeak).toBeLessThanOrEqual(1);
     expect(stream.state.activeBufferedRows).toBe(0);
     const expanded = expandOrderedPriorRowIndices(provenance, rowCount - 1);

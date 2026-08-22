@@ -75,6 +75,7 @@ export function createENAWorkerHost(scope: ENAWorkerScope): void {
 
   const executeRun = async (run: WorkerRun): Promise<void> => {
     const { id } = run;
+    let stream: ReturnType<typeof createAccumulationStream> | undefined;
     try {
       if (run.cancelled) {
         post({ v: 1, kind: 'cancelled', id });
@@ -90,7 +91,7 @@ export function createENAWorkerHost(scope: ENAWorkerScope): void {
       post({ v: 1, kind: 'progress', id, progress: 0, stage: 'accumulate' });
 
       const { rows: _rows, ...streamOptions } = run.options;
-      const stream = createAccumulationStream({ ...streamOptions, expectedRows: rows.length });
+      stream = createAccumulationStream({ ...streamOptions, expectedRows: rows.length });
       for (let index = 0; index < rows.length; index += run.chunkSize) {
         if (run.cancelled) {
           post({ v: 1, kind: 'cancelled', id });
@@ -117,6 +118,8 @@ export function createENAWorkerHost(scope: ENAWorkerScope): void {
       post({ v: 1, kind: 'result', id, result });
     } catch (error) {
       post({ v: 1, kind: 'error', id, message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      stream?.dispose();
     }
   };
 

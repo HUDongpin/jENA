@@ -55,6 +55,8 @@ export interface AccumulationChunkState {
   rowsSeen: number;
   chunksSeen: number;
   isFinished: boolean;
+  /** True after the stream has disconnected its internal accumulation resources. */
+  isDisposed: boolean;
   progress: number;
   activeConversations: number;
   activeBufferedRows: number;
@@ -66,6 +68,8 @@ export interface AccumulationStream {
   readonly state: AccumulationChunkState;
   push(rows: Row[]): AccumulationChunkState;
   finish(): ENAData;
+  /** Idempotently releases retained stream state without mutating an already returned result. */
+  dispose(): void;
   reset(): void;
 }
 
@@ -77,15 +81,212 @@ export function expandOrderedPriorRowIndices(
   provenance: readonly OrderedWindowProvenance[],
   responseRowIndex: number
 ): number[] {
-  if (!Number.isInteger(responseRowIndex) || responseRowIndex < 0) {
+  if (!Number.isSafeInteger(responseRowIndex) || responseRowIndex < 0) {
     throw new Error(`responseRowIndex must be a non-negative integer; got ${String(responseRowIndex)}.`);
   }
+  if (!Array.isArray(provenance)) {
+    throw new Error('Ordered window provenance must be an array.');
+  }
   const byResponseRow = new Map<number, OrderedWindowProvenance>();
+  const horizonDisplayByIdentity = new Map<string, string>();
   for (const entry of provenance) {
+    if (entry === null || typeof entry !== 'object') {
+      throw new Error(`Ordered window provenance entry must be an object; got ${String(entry)}.`);
+    }
+    if (!Number.isSafeInteger(entry.responseRowIndex) || entry.responseRowIndex < 0) {
+      throw new Error(
+        `Ordered window provenance responseRowIndex must be a non-negative integer; got ${String(entry.responseRowIndex)}.`
+      );
+    }
+    if (!Number.isSafeInteger(entry.priorRowCount) || entry.priorRowCount < 0) {
+      throw new Error(
+        `Ordered window provenance priorRowCount for response row ${entry.responseRowIndex} must be a non-negative integer; ` +
+        `got ${String(entry.priorRowCount)}.`
+      );
+    }
+    if (typeof entry.horizon !== 'string') {
+      throw new Error(
+        `Ordered window provenance horizon for response row ${entry.responseRowIndex} must be a string; ` +
+        `got ${String(entry.horizon)}.`
+      );
+    }
+    if (typeof entry.horizonIdentity !== 'string' || entry.horizonIdentity.length === 0) {
+      throw new Error(
+        `Ordered window provenance horizonIdentity for response row ${entry.responseRowIndex} must be a non-empty string; ` +
+        `got ${String(entry.horizonIdentity)}.`
+      );
+    }
+    const previousHorizonDisplay = horizonDisplayByIdentity.get(entry.horizonIdentity);
+    if (previousHorizonDisplay !== undefined && previousHorizonDisplay !== entry.horizon) {
+      throw new Error(
+        `Ordered window provenance horizonIdentity "${entry.horizonIdentity}" has inconsistent horizon displays: ` +
+        `"${previousHorizonDisplay}" and "${entry.horizon}".`
+      );
+    }
+    horizonDisplayByIdentity.set(entry.horizonIdentity, entry.horizon);
+    if (entry.previousRowIndex !== null &&
+      (!Number.isSafeInteger(entry.previousRowIndex) || entry.previousRowIndex < 0)) {
+      throw new Error(
+        `Ordered window provenance previousRowIndex for response row ${entry.responseRowIndex} must be null or a non-negative integer; ` +
+        `got ${String(entry.previousRowIndex)}.`
+      );
+    }
+    if (entry.previousRowIndex === entry.responseRowIndex) {
+      throw new Error(
+        `Ordered window provenance previousRowIndex for response row ${entry.responseRowIndex} must be strictly less than ` +
+        `responseRowIndex; got ${String(entry.previousRowIndex)}.`
+      );
+    }
     if (byResponseRow.has(entry.responseRowIndex)) {
       throw new Error(`Ordered window provenance contains duplicate responseRowIndex ${entry.responseRowIndex}.`);
     }
     byResponseRow.set(entry.responseRowIndex, entry);
+  }
+  for (const entry of provenance) {
+    if (entry.previousRowIndex === null) continue;
+    const previous = byResponseRow.get(entry.previousRowIndex);
+    if (!previous) {
+      throw new Error(
+        `Ordered window provenance is missing predecessor row ${entry.previousRowIndex} for response row ${entry.responseRowIndex}.`
+      );
+    }
+    if (previous.horizonIdentity !== entry.horizonIdentity) {
+      throw new Error(
+        `Ordered window provenance for response row ${entry.responseRowIndex} crosses horizonIdentity at predecessor row ` +
+        `${entry.previousRowIndex}.`
+      );
+    }
+  }
+  const completed = new Set<number>();
+  for (const entry of provenance) {
+    if (completed.has(entry.responseRowIndex)) continue;
+    const currentPath = new Set<number>();
+    const path: number[] = [];
+    let currentRowIndex: number | null = entry.responseRowIndex;
+    while (currentRowIndex !== null && !completed.has(currentRowIndex)) {
+      if (currentPath.has(currentRowIndex)) {
+        throw new Error(
+          `Ordered window provenance contains a predecessor cycle involving response row ${currentRowIndex}.`
+        );
+      }
+      currentPath.add(currentRowIndex);
+      path.push(currentRowIndex);
+      currentRowIndex = byResponseRow.get(currentRowIndex)?.previousRowIndex ?? null;
+    }
+    for (const pathRowIndex of path) completed.add(pathRowIndex);
+  }
+  for (const entry of provenance) {
+    if (entry.previousRowIndex === null && entry.priorRowCount !== 0) {
+      throw new Error(
+        `Ordered window provenance priorRowCount for response row ${entry.responseRowIndex} must be 0 when ` +
+        `previousRowIndex is null; got ${entry.priorRowCount}.`
+      );
+    }
+    if (entry.previousRowIndex !== null && entry.previousRowIndex > entry.responseRowIndex) {
+      throw new Error(
+        `Ordered window provenance previousRowIndex for response row ${entry.responseRowIndex} must be strictly less than ` +
+        `responseRowIndex; got ${String(entry.previousRowIndex)}.`
+      );
+    }
+    if (entry.previousRowIndex !== null) {
+      const previous = byResponseRow.get(entry.previousRowIndex);
+      if (previous && entry.priorRowCount !== previous.priorRowCount &&
+        entry.priorRowCount !== previous.priorRowCount + 1) {
+        throw new Error(
+          `Ordered window provenance priorRowCount for response row ${entry.responseRowIndex} must equal its predecessor count ` +
+          `or increase by one; predecessor row ${previous.responseRowIndex} has ${previous.priorRowCount}, ` +
+          `got ${entry.priorRowCount}.`
+        );
+      }
+    }
+  }
+  interface ProvenanceHorizonChain {
+    root?: OrderedWindowProvenance;
+    entryCount: number;
+  }
+  const chainsByHorizonIdentity = new Map<string, ProvenanceHorizonChain>();
+  const successorByResponseRow = new Map<number, OrderedWindowProvenance>();
+  for (const entry of provenance) {
+    let chain = chainsByHorizonIdentity.get(entry.horizonIdentity);
+    if (!chain) {
+      chain = { entryCount: 0 };
+      chainsByHorizonIdentity.set(entry.horizonIdentity, chain);
+    }
+    chain.entryCount += 1;
+    if (entry.previousRowIndex === null) {
+      if (chain.root) {
+        throw new Error(
+          `Ordered window provenance horizonIdentity "${entry.horizonIdentity}" has multiple chain roots at response rows ` +
+          `${chain.root.responseRowIndex} and ${entry.responseRowIndex}.`
+        );
+      }
+      chain.root = entry;
+      continue;
+    }
+    const existingSuccessor = successorByResponseRow.get(entry.previousRowIndex);
+    if (existingSuccessor) {
+      const earlierSuccessor = existingSuccessor.responseRowIndex < entry.responseRowIndex
+        ? existingSuccessor
+        : entry;
+      const laterSuccessor = existingSuccessor.responseRowIndex < entry.responseRowIndex
+        ? entry
+        : existingSuccessor;
+      throw new Error(
+        `Ordered window provenance previousRowIndex for response row ${laterSuccessor.responseRowIndex} must reference the ` +
+        `immediately preceding response row in its horizonIdentity; expected ${earlierSuccessor.responseRowIndex}, ` +
+        `got ${String(laterSuccessor.previousRowIndex)}.`
+      );
+    }
+    successorByResponseRow.set(entry.previousRowIndex, entry);
+  }
+  for (const [horizonIdentity, chain] of chainsByHorizonIdentity) {
+    if (!chain.root) {
+      throw new Error(`Ordered window provenance horizonIdentity "${horizonIdentity}" has no chain root.`);
+    }
+    let current = chain.root;
+    let entriesVisited = 1;
+    let plateauCount: number | undefined;
+    let next = successorByResponseRow.get(current.responseRowIndex);
+    while (next) {
+      if (plateauCount !== undefined && next.priorRowCount !== plateauCount) {
+        throw new Error(
+          `Ordered window provenance priorRowCount for response row ${next.responseRowIndex} cannot increase after its ` +
+          `horizon chain reached the fixed-window plateau ${plateauCount}; got ${next.priorRowCount}.`
+        );
+      }
+      if (plateauCount === undefined && next.priorRowCount === current.priorRowCount) {
+        plateauCount = current.priorRowCount;
+      }
+      current = next;
+      entriesVisited += 1;
+      next = successorByResponseRow.get(current.responseRowIndex);
+    }
+    if (entriesVisited !== chain.entryCount) {
+      throw new Error(
+        `Ordered window provenance horizonIdentity "${horizonIdentity}" is not one complete predecessor chain; ` +
+        `visited ${entriesVisited} of ${chain.entryCount} entries.`
+      );
+    }
+  }
+  const observedPriorRowLimit = provenance.reduce(
+    (maximum, entry) => Math.max(maximum, entry.priorRowCount),
+    0
+  );
+  for (const chain of chainsByHorizonIdentity.values()) {
+    let current = chain.root;
+    let horizonPosition = 0;
+    while (current) {
+      const expectedPriorRowCount = Math.min(horizonPosition, observedPriorRowLimit);
+      if (current.priorRowCount !== expectedPriorRowCount) {
+        throw new Error(
+          `Ordered window provenance priorRowCount for response row ${current.responseRowIndex} is inconsistent with one ` +
+          `global fixed window: expected ${expectedPriorRowCount} at horizon position ${horizonPosition} with observed ` +
+          `prior-row limit ${observedPriorRowLimit}, got ${current.priorRowCount}.`
+        );
+      }
+      current = successorByResponseRow.get(current.responseRowIndex);
+      horizonPosition += 1;
+    }
   }
   const requested = byResponseRow.get(responseRowIndex);
   if (!requested) {
@@ -108,6 +309,11 @@ export function expandOrderedPriorRowIndices(
     if (!previous) {
       throw new Error(`Ordered window provenance is missing predecessor row ${previousRowIndex}.`);
     }
+    if (previous.horizonIdentity !== requested.horizonIdentity) {
+      throw new Error(
+        `Ordered window provenance for response row ${responseRowIndex} crosses horizonIdentity at predecessor row ${previousRowIndex}.`
+      );
+    }
     previousRowIndex = previous.previousRowIndex;
   }
   return newestToOldest.reverse();
@@ -122,6 +328,7 @@ interface StreamRowEntry {
 
 interface MovingConversationState {
   key: string;
+  identity: string;
   rowsSeen: number;
   nextEmitLocalIndex: number;
   bufferOffset: number;
@@ -471,6 +678,7 @@ function makeOrderedNoForwardConnections(
   internals.rowWindowProvenance.push({
     responseRowIndex: entry.globalIndex,
     horizon: state.key,
+    horizonIdentity: state.identity,
     previousRowIndex: state.orderedPreviousRowIndex,
     priorRowCount
   });
@@ -559,6 +767,7 @@ function getMovingConversation(internals: StreamingInternals, identityKey: strin
   if (!state) {
     state = {
       key: displayLabel,
+      identity: identityKey,
       rowsSeen: 0,
       nextEmitLocalIndex: 0,
       bufferOffset: 0,
@@ -819,11 +1028,14 @@ function makeInternals(options: StreamingAccumulateOptions): StreamingInternals 
   const model = normalizeModel(options.model);
   const window = normalizeWindow(options.window);
   const weightBy = normalizeWeightBy(options.weightBy, networkType);
-  const metadata = options.metadata ?? [];
-  assertNonEmptyColumns(options.units, 'units');
-  assertNonEmptyColumns(options.conversation, 'conversation');
-  assertNonEmptyColumns(options.codes, 'codes');
-  if (options.rows) assertRowsHaveColumns(options.rows, [...options.units, ...options.conversation, ...options.codes, ...metadata]);
+  const units = [...options.units];
+  const conversation = [...options.conversation];
+  const codes = [...options.codes];
+  const metadata = [...(options.metadata ?? [])];
+  assertNonEmptyColumns(units, 'units');
+  assertNonEmptyColumns(conversation, 'conversation');
+  assertNonEmptyColumns(codes, 'codes');
+  if (options.rows) assertRowsHaveColumns(options.rows, [...units, ...conversation, ...codes, ...metadata]);
   return {
     networkType,
     model,
@@ -834,13 +1046,13 @@ function makeInternals(options: StreamingAccumulateOptions): StreamingInternals 
     windowSizeForward: options.windowSizeForward ?? 0,
     includeMeta: options.includeMeta ?? true,
     materialization: options.materialization ?? 'full',
-    units: options.units,
-    conversation: options.conversation,
-    codes: options.codes,
+    units,
+    conversation,
+    codes,
     metadata,
     codeColumns: networkType === 'ordered'
-      ? orderedAdjacencyKey(options.codes).map((entry) => entry.name)
-      : stringVectorToUpperTriangle(options.codes),
+      ? orderedAdjacencyKey(codes).map((entry) => entry.name)
+      : stringVectorToUpperTriangle(codes),
     ...(options.mask ? { mask: flattenMask(options.mask, networkType) } : {}),
     ...(options.unitsUsed ? { unitFilter: new Set(options.unitsUsed.map(String)) } : {}),
     rawRows: [],
@@ -874,30 +1086,38 @@ function ingestRow(internals: StreamingInternals, row: Row, globalIndex: number)
 export function accumulateDataChunked(options: ChunkedAccumulateOptions): ENAData {
   const chunkSize = options.chunkSize ?? 10_000;
   if (chunkSize <= 0 || !Number.isFinite(chunkSize)) throw new Error('chunkSize must be a positive finite number.');
-  options.onProgress?.(0);
+  const { rows, onProgress, ...streamOptions } = options;
+  onProgress?.(0);
   const stream = createAccumulationStream({
-    ...options,
-    rows: [],
-    expectedRows: options.rows.length,
-    onProgress: (progress) => options.onProgress?.(progress)
+    ...streamOptions,
+    expectedRows: rows.length,
+    ...(onProgress ? { onProgress } : {})
   });
-  for (let index = 0; index < options.rows.length; index += chunkSize) {
-    stream.push(options.rows.slice(index, index + chunkSize));
+  try {
+    for (let index = 0; index < rows.length; index += chunkSize) {
+      stream.push(rows.slice(index, index + chunkSize));
+    }
+    return stream.finish();
+  } finally {
+    stream.dispose();
   }
-  const result = stream.finish();
-  options.onProgress?.(1);
-  return result;
 }
 
-export function createAccumulationStream(options: StreamingAccumulateOptions): AccumulationStream {
-  const { rows: initialRows, chunkSize = 10_000, expectedRows, onProgress } = options;
-  if (chunkSize <= 0 || !Number.isFinite(chunkSize)) throw new Error('chunkSize must be a positive finite number.');
-  validateAccumulateOptions(options, { requireRows: false });
-  const internals = makeInternals(options);
+interface AccumulationStreamResources {
+  internals: StreamingInternals | undefined;
+  requiredColumns: string[] | undefined;
+  onProgress: ((progress: number, state: AccumulationChunkState) => void) | undefined;
+}
+
+function makeAccumulationStreamController(
+  resources: AccumulationStreamResources,
+  expectedRows: number | undefined
+): AccumulationStream {
   const state: AccumulationChunkState = {
     rowsSeen: 0,
     chunksSeen: 0,
     isFinished: false,
+    isDisposed: false,
     progress: 0,
     activeConversations: 0,
     activeBufferedRows: 0,
@@ -905,40 +1125,93 @@ export function createAccumulationStream(options: StreamingAccumulateOptions): A
     activeBufferedRowsPeak: 0
   };
 
-  const push = (rows: Row[]): AccumulationChunkState => {
-    if (state.isFinished) throw new Error('Cannot push rows after accumulation stream has finished.');
-    assertRowsHaveColumns(rows, [...options.units, ...options.conversation, ...options.codes, ...(options.metadata ?? [])]);
-    for (const row of rows) {
-      ingestRow(internals, row, state.rowsSeen);
-      state.rowsSeen += 1;
+  const dispose = (): void => {
+    if (!state.isDisposed) {
+      state.isFinished = true;
+      state.isDisposed = true;
+      state.activeConversations = 0;
+      state.activeBufferedRows = 0;
     }
-    state.chunksSeen += 1;
-    updateProgress(state, internals, expectedRows);
-    onProgress?.(state.progress, { ...state });
-    return { ...state };
+    resources.internals = undefined;
+    resources.requiredColumns = undefined;
+    resources.onProgress = undefined;
   };
 
-  if (initialRows && initialRows.length > 0) {
-    for (let index = 0; index < initialRows.length; index += chunkSize) push(initialRows.slice(index, index + chunkSize));
-  }
+  const push = (rows: Row[]): AccumulationChunkState => {
+    if (state.isFinished) throw new Error('Cannot push rows after accumulation stream has finished.');
+    const activeInternals = resources.internals;
+    const columns = resources.requiredColumns;
+    if (!activeInternals || !columns) {
+      dispose();
+      throw new Error('Cannot push rows after accumulation stream has finished.');
+    }
+    try {
+      assertRowsHaveColumns(rows, columns);
+      for (const row of rows) {
+        ingestRow(activeInternals, row, state.rowsSeen);
+        state.rowsSeen += 1;
+      }
+      state.chunksSeen += 1;
+      updateProgress(state, activeInternals, expectedRows);
+      resources.onProgress?.(state.progress, { ...state });
+      return { ...state };
+    } catch (error) {
+      dispose();
+      throw error;
+    }
+  };
 
   return {
     state,
     push,
     finish(): ENAData {
       if (state.isFinished) throw new Error('Accumulation stream has already finished.');
+      let activeInternals = resources.internals;
+      if (!activeInternals) {
+        dispose();
+        throw new Error('Accumulation stream has already finished.');
+      }
       state.isFinished = true;
-      const result = finishInternals(internals);
-      state.progress = 1;
-      updateProgress(state, internals, expectedRows);
-      state.progress = 1;
-      onProgress?.(1, { ...state });
-      return result;
+      try {
+        const result = finishInternals(activeInternals);
+        updateProgress(state, activeInternals, expectedRows);
+        state.progress = 1;
+        const terminalProgress = resources.onProgress;
+        activeInternals = undefined;
+        dispose();
+        terminalProgress?.(1, { ...state });
+        return result;
+      } finally {
+        activeInternals = undefined;
+        dispose();
+      }
     },
+    dispose,
     reset(): void {
+      dispose();
       throw new Error('Reset is not supported for incremental accumulation streams. Create a new stream instead.');
     }
   };
+}
+
+export function createAccumulationStream(options: StreamingAccumulateOptions): AccumulationStream {
+  const { rows: initialRows, chunkSize = 10_000, expectedRows, onProgress } = options;
+  if (chunkSize <= 0 || !Number.isFinite(chunkSize)) throw new Error('chunkSize must be a positive finite number.');
+  validateAccumulateOptions(options, { requireRows: false });
+  const internals = makeInternals(options);
+  const resources: AccumulationStreamResources = {
+    internals,
+    requiredColumns: [...internals.units, ...internals.conversation, ...internals.codes, ...internals.metadata],
+    onProgress
+  };
+  const stream = makeAccumulationStreamController(resources, expectedRows);
+
+  if (initialRows && initialRows.length > 0) {
+    for (let index = 0; index < initialRows.length; index += chunkSize) {
+      stream.push(initialRows.slice(index, index + chunkSize));
+    }
+  }
+  return stream;
 }
 
 export function accumulateDataStreaming(options: StreamingAccumulateOptions): ENAData {

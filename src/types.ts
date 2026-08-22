@@ -94,6 +94,8 @@ export interface OrderedWindowProvenance {
   responseRowIndex: number;
   /** Merged conversation-column value defining the response row's horizon. */
   horizon: string;
+  /** Collision-free typed identity for the response row's horizon tuple. */
+  horizonIdentity: string;
   /** Previous response row in the same typed horizon, or null at its boundary. */
   previousRowIndex: number | null;
   /** Number of predecessor rows actually included in this response's window. */
