@@ -353,6 +353,8 @@ interface ConversationAggregate {
 interface CountAccumulator {
   row: Row;
   sums: number[];
+  /** Stable floating-point expansions for ordered unit/edge aggregation. */
+  orderedPartials?: number[][];
   sequence: number;
 }
 
@@ -466,8 +468,26 @@ function sumCodeVectors(vectors: number[][], width: number): number[] {
   return sumColumns(vectors);
 }
 
-function codeValues(row: Row, codes: string[]): number[] {
-  return codes.map((code) => numeric(row, code));
+function orderedRawCodeValue(row: Row, code: string, rowIndex: number): number {
+  const raw = row[code];
+  const value = typeof raw === 'number'
+    ? raw
+    : typeof raw === 'string' && raw.trim() !== ''
+      ? Number(raw)
+      : Number.NaN;
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(
+      `Ordered network analysis raw code value at row ${rowIndex}, column "${code}" must be a finite ` +
+      `non-negative number or numeric string; got ${String(raw)}.`
+    );
+  }
+  return value;
+}
+
+function codeValues(row: Row, codes: string[], networkType: NetworkType, rowIndex: number): number[] {
+  return networkType === 'ordered'
+    ? codes.map((code) => orderedRawCodeValue(row, code, rowIndex))
+    : codes.map((code) => numeric(row, code));
 }
 
 function makeUnitRow(row: Row, units: string[]): Row {
@@ -531,10 +551,11 @@ function coOccurrenceFromSums(total: number[], subtract: number[] | undefined, b
 }
 
 function finalizeCoOccurrence(values: number[], internals: StreamingInternals): number[] {
+  const finalized = applyWeight(applyMaskToCoOccurrence(values, internals.mask), internals.weightBy);
   if (internals.networkType === 'ordered') {
     const codeCount = internals.codes.length;
-    for (let edgeIndex = 0; edgeIndex < values.length; edgeIndex += 1) {
-      const value = values[edgeIndex];
+    for (let edgeIndex = 0; edgeIndex < finalized.length; edgeIndex += 1) {
+      const value = finalized[edgeIndex];
       if (!Number.isFinite(value)) {
         const groundIndex = edgeIndex % codeCount;
         const responseIndex = Math.floor(edgeIndex / codeCount);
@@ -547,7 +568,7 @@ function finalizeCoOccurrence(values: number[], internals: StreamingInternals): 
       }
     }
   }
-  return applyWeight(applyMaskToCoOccurrence(values, internals.mask), internals.weightBy);
+  return finalized;
 }
 
 function rowWithCoOccurrences(base: Row, co: number[], codeColumns: string[]): Row {
@@ -591,6 +612,9 @@ function ensureEndpointCount(internals: StreamingInternals, row: Row, sequence: 
         ENA_UNIT: displayLabel
       },
       sums: zeros(internals.codeColumns.length),
+      ...(internals.networkType === 'ordered'
+        ? { orderedPartials: Array.from({ length: internals.codeColumns.length }, () => []) }
+        : {}),
       sequence
     };
     internals.endpointCounts.set(key, accumulator);
@@ -611,6 +635,9 @@ function ensureStepCount(internals: StreamingInternals, row: Row, sequence: numb
         TRAJ_UNIT: mergeColumns(row, internals.conversation)
       },
       sums: zeros(internals.codeColumns.length),
+      ...(internals.networkType === 'ordered'
+        ? { orderedPartials: Array.from({ length: internals.codeColumns.length }, () => []) }
+        : {}),
       sequence
     };
     internals.stepCounts.set(key, accumulator);
@@ -619,9 +646,23 @@ function ensureStepCount(internals: StreamingInternals, row: Row, sequence: numb
   return accumulator;
 }
 
-function addToAccumulator(accumulator: CountAccumulator, values: number[]): void {
+function addToAccumulator(
+  accumulator: CountAccumulator,
+  values: number[],
+  networkType: NetworkType
+): void {
   for (let index = 0; index < values.length; index += 1) {
-    accumulator.sums[index] = (accumulator.sums[index] ?? 0) + (values[index] ?? 0);
+    const value = values[index] ?? 0;
+    if (networkType === 'ordered') {
+      const partials = accumulator.orderedPartials?.[index];
+      if (!partials) {
+        throw new Error(`Ordered network analysis internal accumulator is missing edge index ${index}.`);
+      }
+      addOrderedRunningPartial(partials, value);
+      accumulator.sums[index] = orderedRunningTotal(partials);
+    } else {
+      accumulator.sums[index] = (accumulator.sums[index] ?? 0) + value;
+    }
   }
 }
 
@@ -642,9 +683,9 @@ function consumeRowConnection(internals: StreamingInternals, index: number, row:
   if (internals.unitFilter && !internals.unitFilter.has(unit)) return;
   const values = internals.codeColumns.map((column) => numeric(row, column));
   if (internals.model === 'EndPoint') {
-    addToAccumulator(ensureEndpointCount(internals, row, index), values);
+    addToAccumulator(ensureEndpointCount(internals, row, index), values, internals.networkType);
   } else {
-    addToAccumulator(ensureStepCount(internals, row, index), values);
+    addToAccumulator(ensureStepCount(internals, row, index), values, internals.networkType);
   }
 }
 
@@ -934,7 +975,7 @@ function pushMovingRow(internals: StreamingInternals, row: Row, globalIndex: num
     globalIndex,
     localIndex: state.rowsSeen,
     row,
-    codeValues: codeValues(row, internals.codes)
+    codeValues: codeValues(row, internals.codes, internals.networkType, globalIndex)
   };
   state.rowsSeen += 1;
 
@@ -1023,12 +1064,35 @@ function matrixFromRows(rows: Row[], columns: string[]): Matrix {
   return rows.map((row) => columns.map((column) => numeric(row, column)));
 }
 
+function finalizedAccumulatorSums(accumulator: CountAccumulator | undefined, internals: StreamingInternals): number[] {
+  if (internals.networkType !== 'ordered') {
+    return accumulator?.sums ?? zeros(internals.codeColumns.length);
+  }
+  return internals.codeColumns.map((_column, edgeIndex) => {
+    const partials = accumulator?.orderedPartials?.[edgeIndex] ?? [];
+    const value = orderedRunningTotal(partials);
+    if (!Number.isFinite(value)) {
+      const codeCount = internals.codes.length;
+      const groundIndex = edgeIndex % codeCount;
+      const responseIndex = Math.floor(edgeIndex / codeCount);
+      const ground = internals.codes[groundIndex] ?? String(groundIndex);
+      const response = internals.codes[responseIndex] ?? String(responseIndex);
+      throw new Error(
+        `Ordered network analysis unit aggregation overflow at edge index ${edgeIndex} ` +
+        `(${ground} -> ${response}); got ${String(value)}. Reduce row count or raw code magnitudes.`
+      );
+    }
+    return value;
+  });
+}
+
 function makeEndpointResult(internals: StreamingInternals): { connectionCounts: Row[]; metaData: Row[]; countRows: Row[] } {
   const countRows = internals.endpointOrder.map((key) => {
     const accumulator = internals.endpointCounts.get(key);
+    const sums = finalizedAccumulatorSums(accumulator, internals);
     return {
       ...(accumulator?.row ?? { ENA_UNIT: key }),
-      ...Object.fromEntries(internals.codeColumns.map((column, index) => [column, accumulator?.sums[index] ?? 0]))
+      ...Object.fromEntries(internals.codeColumns.map((column, index) => [column, sums[index] ?? 0]))
     } as Row;
   });
   const metaData = buildMetadataRows(internals, new Set(internals.endpointOrder));
@@ -1046,9 +1110,10 @@ function makeEndpointResult(internals: StreamingInternals): { connectionCounts: 
 function makeTrajectoryRows(internals: StreamingInternals): Row[] {
   return internals.stepOrder.map((key) => {
     const accumulator = internals.stepCounts.get(key);
+    const sums = finalizedAccumulatorSums(accumulator, internals);
     return {
       ...(accumulator?.row ?? {}),
-      ...Object.fromEntries(internals.codeColumns.map((column, index) => [column, accumulator?.sums[index] ?? 0]))
+      ...Object.fromEntries(internals.codeColumns.map((column, index) => [column, sums[index] ?? 0]))
     } as Row;
   });
 }

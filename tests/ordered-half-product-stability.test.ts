@@ -79,6 +79,70 @@ describe.each(accumulationModes)("ordered half-product stability through $name a
     );
   });
 
+  it("rejects non-finite ordered connections introduced by a finite directional mask", () => {
+    expect(() => run({
+      ...optionsFor([{ unit: "u1", horizon: "h1", A: 4, B: 4 }], "ordered"),
+      mask: [
+        [1, Number.MAX_VALUE],
+        [1, 1]
+      ]
+    })).toThrowError(
+      /Ordered network analysis derived a non-finite connection .* got Infinity\./
+    );
+  });
+
+  it("fails closed when finite ordered row contributions overflow during unit aggregation", () => {
+    expect(() => run(optionsFor(Array.from({ length: 3 }, () => ({
+      unit: "u1",
+      horizon: "h1",
+      A: Number.MAX_VALUE,
+      B: 1
+    })), "ordered"))).toThrowError(
+      /Ordered network analysis unit aggregation overflow .*\((?:A -> B|B -> A)\); got Infinity\./
+    );
+  });
+
+  it("retains representable small ordered contributions regardless of horizon arrival order", () => {
+    const rowsFor = (magnitudes: number[]): Row[] => magnitudes.flatMap((magnitude, index) => [
+      { unit: "u1", horizon: `h${index}`, A: magnitude, B: 0 },
+      { unit: "u1", horizon: `h${index}`, A: 0, B: 1 }
+    ]);
+    const largeFirst = run({
+      ...optionsFor(rowsFor([1e16, 1, 1]), "ordered"),
+      windowSizeBack: 2
+    });
+    const largeLast = run({
+      ...optionsFor(rowsFor([1, 1, 1e16]), "ordered"),
+      windowSizeBack: 2
+    });
+
+    expect(edgeValue(largeFirst, "A", "B")).toBe(10000000000000002);
+    expect(edgeValue(largeLast, "A", "B")).toBe(10000000000000002);
+  });
+
+  it.each([
+    { label: "negative", value: -1 },
+    { label: "non-numeric", value: "not-a-count" },
+    { label: "empty", value: "" },
+    { label: "null", value: null },
+    { label: "boolean", value: true }
+  ])("rejects $label ordered raw code values instead of coercing them", ({ value }) => {
+    expect(() => run(optionsFor([
+      { unit: "u1", horizon: "h1", A: value, B: 1 }
+    ], "ordered"))).toThrowError(
+      /Ordered network analysis raw code value at row 0, column "A" must be a finite non-negative number or numeric string/
+    );
+  });
+
+  it("accepts finite non-negative numeric strings for CSV-facing ordered callers", () => {
+    const data = run(optionsFor([
+      { unit: "u1", horizon: "h1", A: "2", B: "3" }
+    ], "ordered"));
+
+    expect(edgeValue(data, "A", "B")).toBe(3);
+    expect(edgeValue(data, "B", "A")).toBe(3);
+  });
+
   it("leaves the standard ENA product unhalved", () => {
     const data = run(optionsFor([
       { unit: "u1", horizon: "h1", A: Number.MIN_VALUE, B: 2 }
