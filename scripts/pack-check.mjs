@@ -3,7 +3,7 @@
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { assertZeroRuntimeDependencyContract } from "./package-contract.mjs";
 
@@ -66,6 +66,58 @@ if (sizeMb > 1) {
   process.exit(1);
 }
 
+// Source maps are debugging aids, not the complete corresponding-source route.
+// Still, every source they do embed must match the current repository source so
+// pack:check cannot bless stale dist output after a source-only edit.
+const sourceRoot = resolve(projectDir, "src");
+const mapProblems = [];
+const packedFiles = new Set(files);
+for (const file of files.filter((candidate) => candidate.endsWith(".js"))) {
+  if (!packedFiles.has(`${file}.map`)) {
+    mapProblems.push(`${file}: packed runtime module is missing its source map`);
+  }
+  const sourceMapPointer = readFileSync(join(projectDir, file), "utf8")
+    .match(/\/\/# sourceMappingURL=([^\r\n]+)\s*$/u)?.[1];
+  if (sourceMapPointer !== basename(`${file}.map`)) {
+    mapProblems.push(`${file}: sourceMappingURL does not name ${basename(`${file}.map`)}`);
+  }
+}
+for (const file of files.filter((candidate) => candidate.endsWith(".js.map"))) {
+  if (!packedFiles.has(file.slice(0, -4))) {
+    mapProblems.push(`${file}: packed source map has no matching JavaScript module`);
+  }
+  const mapPath = join(projectDir, file);
+  const map = JSON.parse(readFileSync(mapPath, "utf8"));
+  if (!Array.isArray(map.sources) || !Array.isArray(map.sourcesContent) ||
+      map.sources.length !== map.sourcesContent.length) {
+    mapProblems.push(`${file}: sources and sourcesContent must be equal-length arrays`);
+    continue;
+  }
+  for (let index = 0; index < map.sources.length; index += 1) {
+    const source = map.sources[index];
+    const embedded = map.sourcesContent[index];
+    if (typeof source !== "string" || typeof embedded !== "string") {
+      mapProblems.push(`${file}: source ${index} must have string sourcesContent`);
+      continue;
+    }
+    const sourcePath = resolve(dirname(mapPath), source);
+    const sourceRelative = relative(sourceRoot, sourcePath);
+    if (sourceRelative === ".." || sourceRelative.startsWith(`..${sep}`) ||
+        isAbsolute(sourceRelative)) {
+      mapProblems.push(`${file}: source ${source} resolves outside src/`);
+      continue;
+    }
+    if (readFileSync(sourcePath, "utf8") !== embedded) {
+      mapProblems.push(`${file}: embedded source is stale for ${sourceRelative}`);
+    }
+  }
+}
+if (mapProblems.length > 0) {
+  console.error("Packed source maps do not match the current repository source:");
+  for (const problem of mapProblems) console.error(`  ${problem}`);
+  process.exit(1);
+}
+
 // The worker entry registers its message host as a module side effect; if
 // sideEffects stops declaring it, bundlers tree-shake a bare
 // `import "jena-js/browser/worker"` into an empty worker chunk (0.6.2).
@@ -84,5 +136,5 @@ try {
 }
 
 console.log(
-  "pack-check OK: only dist + docs ship, all entry points present, worker side effect declared, zero runtime dependencies.",
+  "pack-check OK: only dist + docs ship, source maps are fresh, all entry points present, worker side effect declared, zero runtime dependencies.",
 );

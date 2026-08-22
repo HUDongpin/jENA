@@ -2,8 +2,8 @@
 
 ## 0.7.0-ona.0 (unpublished prerelease) - 2026-08-22
 
-This prerelease exists only in the local source branch. It has not been tagged
-or published to npm.
+This prerelease is available from the public review branch. It has not been
+tagged or published to npm.
 
 ### Added: ordered network API
 
@@ -25,6 +25,9 @@ or published to npm.
 - Ordered `makeSet()` now selects the directed node-position solver by default.
   The solver's incident weights count a self-loop once and a non-self edge at
   both endpoints.
+- Ordered modeling is explicitly SVD-only in this phase. Custom rotations,
+  `rotationSet`, and ordered `projectIn()` calls fail closed rather than
+  inheriting unverified standard-ENA workflows.
 
 ### Scientific contract
 
@@ -39,6 +42,10 @@ or published to npm.
   share context; interleaved rows continue their own horizon chains in caller-
   supplied input order. Each connection contribution belongs to its response
   row's analytic unit.
+- The finite-window contract now records the explicit tma conversion:
+  `tma window_size = k` corresponds to jENA `windowSizeBack = k + 1`. A
+  committed four-row R golden distinguishes cutoffs that the two-row Yu case
+  cannot test.
 - The canonical Yu oracle matched all 87 unit rows × 49 directed dimensions,
   total connection mass 811, and three zero networks with zero differing
   cells. Oracle versions and hashes are recorded in PROVENANCE.md.
@@ -51,15 +58,70 @@ or published to npm.
   ground/response solver are rejected.
 - Runtime `ENAData` validation now checks network/model/function-parameter
   agreement, exact ordered headers/key order, and all `p²` widths and
-  count/matrix values before `makeSet()` or `projectIn()` models data. The
+  count/matrix values before `makeSet()` models data. Ordered `projectIn()` is
+  rejected by the SVD-only phase boundary. The
   provenance expansion helper separately validates a persisted compact chain
   before reading it. Duplicate codes, colliding ordered display headers, and
   ambiguous unit display labels fail closed; delimiter- and type-colliding
   horizon displays remain separate through collision-free typed identities.
+- Generated ordered edge headers must be disjoint from unit, conversation,
+  metadata, code, reserved-output, and every actual raw-row key. JavaScript
+  callers also cannot reuse a code column as a unit, conversation, or metadata
+  column. These role collisions fail before row values are consumed. Identity
+  fields must be strings, finite numbers, booleans, or null; unsupported
+  runtime values fail before identity maps or accumulators are created.
+- The dense ordered SVD has a non-configurable safety budget: at most 12 codes
+  / 144 directed edges, at most 8,000,000 estimated `units×E²+E³` work units,
+  and at most 1 MiB of estimated dense numeric matrices. The 7-code/87-unit Yu
+  oracle occupies 4.08% of the work cap and 12.00% of the matrix cap.
+- Ordered running windows and unit aggregates now share a half-even expansion
+  finalizer. Unit overflow fails immediately; zero mask cells short-circuit
+  irrelevant products, while positive-mask underflow and non-finite results
+  fail closed. When a finite-window prior sum exceeds `Number.MAX_VALUE` but
+  multiplication by a fractional response remains finite, the retained
+  expansion is scaled before it is finalized; a zero response remains exactly
+  zero instead of producing `Infinity × 0 = NaN`. Fractional masks likewise
+  scale lagged and same-row contributions before an otherwise overflowing
+  intermediate sum; the larger-magnitude operand is masked first to avoid
+  amplifying subnormal rounding. Mask underflow and genuinely non-finite
+  masked results still fail closed.
+- Worker clients may receive a `workerFactory` to hard-stop synchronous
+  model/SVD work on cancel, abort, or timeout, settle every request discarded
+  by termination, recreate the worker, and remain reusable. The worker host
+  now uses O(1) ID/queue bookkeeping and bounds the waiting queue at 32 by
+  default. A duplicate protocol-v1 run ID is dropped without a terminal
+  response, preserving the first accepted request that owns that ID. The
+  client separately admits at most 33 posted requests without a worker terminal
+  response by default and rejects overflow before `postMessage`, so excess
+  payloads are neither cloned nor queued. A cooperatively cancelled request
+  keeps its admission slot until the worker acknowledges its terminal state.
+  Instance-only cooperative cancellation rejects its Promise immediately;
+  without a factory, synchronous model work that began before model progress
+  was observed may still finish in the worker.
 - Ordered finite windows use bounded removable history, while infinite windows
   use running sums. Both store O(rows) compact provenance rather than copying
   prior-row arrays. Batch, chunked, and manual streaming output is identical;
   finished streams release active histories and reject further use.
+
+### Release and provenance
+
+- Replaced the malformed upstream-derived root license copy with the canonical
+  674-line FSF GPLv3 plain text and pinned its SHA-256 plus npm inclusion in the
+  package contract test. `.gitattributes` fixes the license to LF line endings
+  so its canonical byte identity is stable across platforms.
+- Recorded the exact public source commit for the published `jena-js@0.6.3`,
+  corrected the rENA archive/commit/tarball identities, and changed the future
+  release checklist so the public tag and full source commit are verified
+  before any object-code publication.
+- Expanded the synthetic tma oracle record with the CRAN source archive hash,
+  serialization dependencies, namespace-qualified calls, and body plus
+  definition hashes for every tma entry point used by the generator. The Yu
+  oracle is explicitly labeled hash-pinned local evidence rather than a public
+  reproduction route.
+- `pack:check` now requires a source map for every packed JavaScript module and
+  verifies each embedded `sourcesContent` value byte-for-byte against the
+  current repository source. Source maps remain debugging aids, not the full
+  corresponding-source route.
 
 ### Public compatibility note
 

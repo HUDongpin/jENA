@@ -1,5 +1,6 @@
 import type { AccumulateOptions, ENAData, MakeSetOptions, Matrix, WeightBy } from '../types.js';
 import { adjacencyKey, orderedAdjacencyKey } from './matrix.js';
+import { assertOrderedAdjacencyBudget, validateOrderedColumnNamespace } from './orderedLimits.js';
 
 // Boundary validation for the public entry points (advisory F-011). Every
 // rejection names the offending option and how to fix it, so malformed input
@@ -66,6 +67,15 @@ export function validateAccumulateOptions(
   if (options.networkType !== undefined && !NETWORK_TYPES.has(options.networkType)) {
     throw new Error(`networkType must be one of ${[...NETWORK_TYPES].join(', ')}; got "${String(options.networkType)}".`);
   }
+  if (options.networkType === 'ordered') {
+    assertOrderedAdjacencyBudget(options.codes.length);
+    validateOrderedColumnNamespace({
+      codes: options.codes,
+      units: options.units,
+      conversation: options.conversation,
+      ...(options.metadata ? { metadata: options.metadata } : {})
+    });
+  }
   if (options.model !== undefined && !MODELS.has(options.model)) {
     throw new Error(`model must be one of ${[...MODELS].join(', ')}; got "${String(options.model)}".`);
   }
@@ -89,10 +99,6 @@ export function validateAccumulateOptions(
   }
 
   if (options.networkType === 'ordered') {
-    const orderedHeaders = orderedAdjacencyKey(options.codes).map((entry) => entry.name);
-    if (new Set(orderedHeaders).size !== orderedHeaders.length) {
-      throw new Error('Ordered adjacency headers collide; use unambiguous code labels so every "<ground> & <response>" header is unique.');
-    }
     const model = options.model ?? 'EndPoint';
     if (model !== 'EndPoint') {
       throw new Error(`Ordered network analysis requires model "EndPoint"; got "${model}".`);
@@ -130,6 +136,24 @@ export function validateMakeSetOptions(options: MakeSetOptions): void {
 
 function formatWeightBy(weightBy: WeightBy): string {
   return typeof weightBy === 'function' ? 'function' : `"${weightBy}"`;
+}
+
+function orderedMetadataColumns(enadata: ENAData): string[] {
+  if (!Array.isArray(enadata.metaData)) return [];
+  const structuralColumns = new Set([
+    ...enadata.units,
+    ...enadata.conversation,
+    'ENA_UNIT',
+    'TRAJ_UNIT'
+  ]);
+  const metadata = new Set<string>();
+  for (const row of enadata.metaData) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    for (const column of Object.keys(row)) {
+      if (!structuralColumns.has(column)) metadata.add(column);
+    }
+  }
+  return [...metadata];
 }
 
 function validateExplicitStandardENADataSchema(enadata: ENAData): void {
@@ -308,6 +332,14 @@ export function validateENADataNetworkContract(enadata: ENAData): void {
   if (duplicateCode !== undefined) {
     throw new Error(`Ordered ENAData codes must be unique; duplicate "${duplicateCode}".`);
   }
+
+  assertOrderedAdjacencyBudget(enadata.codes.length);
+  validateOrderedColumnNamespace({
+    codes: enadata.codes,
+    units: enadata.units,
+    conversation: enadata.conversation,
+    metadata: orderedMetadataColumns(enadata)
+  });
 
   const expectedKey = orderedAdjacencyKey(enadata.codes);
   const expectedWidth = expectedKey.length;

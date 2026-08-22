@@ -39,11 +39,39 @@ actual registry manifest.
 Commit (`release: vX.Y.Z`), push, and wait for CI (Node 18/20/22 + Chromium)
 to go green on the release commit.
 
-## 3. Publish
+## 3. Establish the exact public source identity
+
+After the release commit is pushed and CI is green:
+
+```bash
+release_commit="$(git rev-parse HEAD)"
+git tag -a vX.Y.Z -m "jena-js X.Y.Z"
+git push origin vX.Y.Z
+test "$(git rev-parse 'vX.Y.Z^{commit}')" = "$release_commit"
+test "$(git ls-remote --tags origin 'refs/tags/vX.Y.Z^{}' | cut -f1)" = "$release_commit"
+```
+
+The second comparison verifies the remote annotated tag's peeled commit, not
+only the tag-object SHA. Both local and remote tag identities must resolve to
+the same reviewed release commit.
+Record both the public tag and full commit SHA in release provenance before
+publishing object code. Do not publish if the public tag, commit mapping, or
+repository source tree is unavailable.
+
+Establishing source identity is not itself legal or release approval. Before
+publishing, the release owner and a qualified reviewer must also confirm the
+corresponding-source route, directions adjacent to the distributed object code,
+canonical license copy, attribution/modification notices, and the exact
+object-code-to-source mapping.
+
+## 4. Publish
 
 ```bash
 npm publish
 ```
+
+Do not run `npm publish` until both the exact public source identity and the
+qualified release/license gate above are complete.
 
 Notes from practice:
 
@@ -55,15 +83,13 @@ Notes from practice:
 - `prepublishOnly` re-runs lint + typecheck + tests + build + pack-check;
   `prepare` rebuilds `dist` — a stale build cannot ship.
 
-## 4. Tag and announce
+## 5. Create the GitHub release and announce
 
 ```bash
-git tag -a vX.Y.Z -m "jena-js X.Y.Z"
-git push origin vX.Y.Z
 gh release create vX.Y.Z --title "jena-js X.Y.Z" --notes "<highlights + CHANGELOG pointer>"
 ```
 
-## 5. Post-release smoke test
+## 6. Post-release smoke test
 
 The registry's read replicas lag the publish by up to a minute or two — poll
 `npm view jena-js version` until it reports the new version before testing.

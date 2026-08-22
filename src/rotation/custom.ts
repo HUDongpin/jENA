@@ -1,9 +1,11 @@
 /*
  * Derived from rENA 0.3.1 (GPL-3), (c) the rENA authors: Cody L Marquart,
  * Zachari Swiecki, Wesley Collier, Brendan Eagan, Roman Woodward, and
- * David Williamson Shaffer. This file ports R/ena.rotate.by.mean.R; the
- * generalized/regression/hena/spherical rotations are unverified
- * approximations of their R counterparts.
+ * David Williamson Shaffer. This file ports R/ena.rotate.by.mean.R. The
+ * documented regression, regression2, generalized, and hena configurations
+ * are verified against pinned rENA goldens; spherical is a jena extension with
+ * no rENA counterpart. Ordered-network product entry points reject all custom
+ * rotations in the current descriptive SVD-only phase.
  * TypeScript translation and modifications for jena-js, GPL-3.0-only.
  * See PROVENANCE.md for the upstream NOTICE and version pin.
  */

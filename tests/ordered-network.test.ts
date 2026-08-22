@@ -310,7 +310,7 @@ describe("ordered network validation", () => {
       codes: ambiguousCodes,
       windowSizeBack: 2
     }))).toThrowError(
-      'Ordered adjacency headers collide; use unambiguous code labels so every "<ground> & <response>" header is unique.'
+      'Ordered adjacency header "A & A" collides with codes column "A & A"; rename the input column or code label.'
     );
   });
 

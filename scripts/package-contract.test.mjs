@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { dirname, join } from "node:path";
@@ -34,6 +35,20 @@ test("repository manifest and lock carry the ordered prerelease identity", () =>
   assert.equal(pkg.name, PACKAGE_NAME);
   assert.equal(pkg.version, PACKAGE_VERSION);
   assert.doesNotThrow(() => assertZeroRuntimeDependencyContract(pkg, lock));
+});
+
+test("pins the canonical GPL-3.0-only license copy and npm inclusion", () => {
+  const pkg = JSON.parse(readFileSync(join(PROJECT_DIR, "package.json"), "utf8"));
+  const license = readFileSync(join(PROJECT_DIR, "LICENSE"));
+  const attributes = readFileSync(join(PROJECT_DIR, ".gitattributes"), "utf8");
+
+  assert.equal(pkg.license, "GPL-3.0-only");
+  assert.ok(Array.isArray(pkg.files) && pkg.files.includes("LICENSE"));
+  assert.match(attributes, /^LICENSE text eol=lf$/mu);
+  assert.equal(
+    createHash("sha256").update(license).digest("hex"),
+    "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+  );
 });
 
 test("accepts a matching zero-runtime package and lock root", () => {

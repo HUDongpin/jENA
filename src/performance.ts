@@ -490,6 +490,50 @@ function codeValues(row: Row, codes: string[], networkType: NetworkType, rowInde
     : codes.map((code) => numeric(row, code));
 }
 
+function orderedIdentityValueKind(value: unknown): string {
+  if (typeof value === 'number' && !Number.isFinite(value)) return String(value);
+  return typeof value;
+}
+
+function assertOrderedIdentityColumns(
+  row: Row,
+  rowIndex: number,
+  kind: 'unit' | 'conversation' | 'metadata',
+  columns: string[]
+): void {
+  for (const column of columns) {
+    const value: unknown = row[column];
+    const isScalar = value === null
+      || typeof value === 'string'
+      || typeof value === 'boolean'
+      || (typeof value === 'number' && Number.isFinite(value));
+    if (!isScalar) {
+      throw new Error(
+        `Ordered network analysis ${kind} identity value at row ${rowIndex}, column "${column}" ` +
+        `must be a string, finite number, boolean, or null; got ${orderedIdentityValueKind(value)}.`
+      );
+    }
+  }
+}
+
+function assertOrderedIdentityValues(internals: StreamingInternals, row: Row, rowIndex: number): void {
+  if (internals.networkType !== 'ordered') return;
+  assertOrderedIdentityColumns(row, rowIndex, 'unit', internals.units);
+  assertOrderedIdentityColumns(row, rowIndex, 'conversation', internals.conversation);
+  assertOrderedIdentityColumns(row, rowIndex, 'metadata', internals.metadata);
+}
+
+function assertOrderedRawKeysDoNotCollide(internals: StreamingInternals, row: Row, rowIndex: number): void {
+  if (internals.networkType !== 'ordered') return;
+  for (const header of internals.codeColumns) {
+    if (Object.prototype.hasOwnProperty.call(row, header)) {
+      throw new Error(
+        `Ordered network analysis raw row ${rowIndex} key "${header}" collides with generated edge header "${header}".`
+      );
+    }
+  }
+}
+
 function makeUnitRow(row: Row, units: string[]): Row {
   return { ...row, ENA_UNIT: mergeColumns(row, units) };
 }
@@ -551,16 +595,21 @@ function coOccurrenceFromSums(total: number[], subtract: number[] | undefined, b
 }
 
 function finalizeCoOccurrence(values: number[], internals: StreamingInternals): number[] {
-  const finalized = applyWeight(applyMaskToCoOccurrence(values, internals.mask), internals.weightBy);
+  // Ordered edge construction applies its directional mask before returning
+  // so a fractional mask can keep an otherwise overflowing sum representable.
+  const masked = internals.networkType === 'ordered'
+    ? values
+    : applyMaskToCoOccurrence(values, internals.mask);
+  const finalized = applyWeight(masked, internals.weightBy);
   if (internals.networkType === 'ordered') {
     const codeCount = internals.codes.length;
     for (let edgeIndex = 0; edgeIndex < finalized.length; edgeIndex += 1) {
       const value = finalized[edgeIndex];
+      const groundIndex = edgeIndex % codeCount;
+      const responseIndex = Math.floor(edgeIndex / codeCount);
+      const ground = internals.codes[groundIndex] ?? String(groundIndex);
+      const response = internals.codes[responseIndex] ?? String(responseIndex);
       if (!Number.isFinite(value)) {
-        const groundIndex = edgeIndex % codeCount;
-        const responseIndex = Math.floor(edgeIndex / codeCount);
-        const ground = internals.codes[groundIndex] ?? String(groundIndex);
-        const response = internals.codes[responseIndex] ?? String(responseIndex);
         throw new Error(
           `Ordered network analysis derived a non-finite connection at edge index ${edgeIndex} ` +
           `(${ground} -> ${response}); got ${String(value)}. Reduce raw code magnitudes so every connection product remains finite.`
@@ -649,17 +698,29 @@ function ensureStepCount(internals: StreamingInternals, row: Row, sequence: numb
 function addToAccumulator(
   accumulator: CountAccumulator,
   values: number[],
-  networkType: NetworkType
+  internals: StreamingInternals
 ): void {
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index] ?? 0;
-    if (networkType === 'ordered') {
+    if (internals.networkType === 'ordered') {
       const partials = accumulator.orderedPartials?.[index];
       if (!partials) {
         throw new Error(`Ordered network analysis internal accumulator is missing edge index ${index}.`);
       }
       addOrderedRunningPartial(partials, value);
-      accumulator.sums[index] = orderedExpansionTotal(partials);
+      const total = orderedExpansionTotal(partials);
+      if (!Number.isFinite(total)) {
+        const codeCount = internals.codes.length;
+        const groundIndex = index % codeCount;
+        const responseIndex = Math.floor(index / codeCount);
+        const ground = internals.codes[groundIndex] ?? String(groundIndex);
+        const response = internals.codes[responseIndex] ?? String(responseIndex);
+        throw new Error(
+          `Ordered network analysis unit aggregation overflow at edge index ${index} ` +
+          `(${ground} -> ${response}); got ${String(total)}. Reduce row count or raw code magnitudes.`
+        );
+      }
+      accumulator.sums[index] = total;
     } else {
       accumulator.sums[index] = (accumulator.sums[index] ?? 0) + value;
     }
@@ -683,9 +744,9 @@ function consumeRowConnection(internals: StreamingInternals, index: number, row:
   if (internals.unitFilter && !internals.unitFilter.has(unit)) return;
   const values = internals.codeColumns.map((column) => numeric(row, column));
   if (internals.model === 'EndPoint') {
-    addToAccumulator(ensureEndpointCount(internals, row, index), values, internals.networkType);
+    addToAccumulator(ensureEndpointCount(internals, row, index), values, internals);
   } else {
-    addToAccumulator(ensureStepCount(internals, row, index), values, internals.networkType);
+    addToAccumulator(ensureStepCount(internals, row, index), values, internals);
   }
 }
 
@@ -734,17 +795,67 @@ function orderedHalfProduct(left: number, right: number): number {
     : left * (right * 0.5);
 }
 
-function orderedConnections(prior: number[], response: number[], codes: string[]): number[] {
+function orderedFractionallyMaskedLaggedProduct(
+  priorPartials: readonly number[],
+  currentResponse: number,
+  maskWeight: number
+): number {
+  const scaledPartials: number[] = [];
+  for (const partial of priorPartials) {
+    // Apply the fractional mask to the larger-magnitude operand. Masking the
+    // smaller one first can round it to a low-precision subnormal whose error
+    // is then amplified by the larger operand.
+    const scaled = Math.abs(partial) >= Math.abs(currentResponse)
+      ? (partial * maskWeight) * currentResponse
+      : partial * (currentResponse * maskWeight);
+    addOrderedRunningPartial(scaledPartials, scaled);
+  }
+  return orderedExpansionTotal(scaledPartials);
+}
+
+function orderedFractionallyMaskedSameRowProduct(
+  currentGround: number,
+  currentResponse: number,
+  maskWeight: number
+): number {
+  return Math.abs(currentGround) >= Math.abs(currentResponse)
+    ? orderedHalfProduct(currentGround * maskWeight, currentResponse)
+    : orderedHalfProduct(currentGround, currentResponse * maskWeight);
+}
+
+function orderedConnections(
+  prior: number[],
+  priorPartials: readonly (readonly number[])[],
+  response: number[],
+  codes: string[],
+  flatMask: number[] | undefined
+): number[] {
   const width = response.length;
   const connections = zeros(width * width);
   for (let responseIndex = 0; responseIndex < width; responseIndex += 1) {
     for (let groundIndex = 0; groundIndex < width; groundIndex += 1) {
       const edgeIndex = responseIndex * width + groundIndex;
+      const maskWeight = flatMask?.[edgeIndex] ?? 1;
+      if (maskWeight === 0) continue;
       const ground = codes[groundIndex] ?? String(groundIndex);
       const responseCode = codes[responseIndex] ?? String(responseIndex);
       const priorGround = prior[groundIndex] ?? 0;
       const currentResponse = response[responseIndex] ?? 0;
-      const lagged = priorGround * currentResponse;
+      let lagged = priorGround * currentResponse;
+      if (currentResponse === 0) {
+        // A mathematically zero connection stays zero even when the exact
+        // prior expansion is larger than Number.MAX_VALUE.
+        lagged = 0;
+      } else if (!Number.isFinite(priorGround) && currentResponse < 1) {
+        // Scaling the retained expansion before summing avoids a premature
+        // Infinity for cases such as (MAX_VALUE + MAX_VALUE) * 0.25, whose
+        // exact product is still representable.
+        const scaledPartials: number[] = [];
+        for (const partial of priorPartials[groundIndex] ?? []) {
+          addOrderedRunningPartial(scaledPartials, partial * currentResponse);
+        }
+        lagged = orderedExpansionTotal(scaledPartials);
+      }
       assertOrderedProductDidNotUnderflow(
         priorGround,
         currentResponse,
@@ -769,7 +880,39 @@ function orderedConnections(prior: number[], response: number[], codes: string[]
           'same-row'
         );
       }
-      connections[edgeIndex] = lagged + sameRow;
+      const unmaskedConnection = lagged + sameRow;
+      let connection: number;
+      if (Number.isFinite(unmaskedConnection) || maskWeight >= 1) {
+        // Preserve the established rounding path whenever the unmasked sum is
+        // representable. Masks >= 1 cannot rescue a non-finite positive sum.
+        connection = unmaskedConnection * maskWeight;
+      } else {
+        const maskedLagged = Number.isFinite(lagged)
+          ? lagged * maskWeight
+          : orderedFractionallyMaskedLaggedProduct(
+            priorPartials[groundIndex] ?? [],
+            currentResponse,
+            maskWeight
+          );
+        const maskedSameRow = Number.isFinite(sameRow)
+          ? sameRow * maskWeight
+          : orderedFractionallyMaskedSameRowProduct(
+            response[groundIndex] ?? 0,
+            currentResponse,
+            maskWeight
+          );
+        const maskedPartials: number[] = [];
+        addOrderedRunningPartial(maskedPartials, maskedLagged);
+        addOrderedRunningPartial(maskedPartials, maskedSameRow);
+        connection = orderedExpansionTotal(maskedPartials);
+      }
+      if ((lagged > 0 || sameRow > 0) && maskWeight > 0 && connection === 0) {
+        throw new Error(
+          `Ordered network analysis mask underflow at edge index ${edgeIndex} (${ground} -> ${responseCode}): ` +
+          `positive connection ${String(unmaskedConnection)} and mask weight ${String(maskWeight)} produced 0.`
+        );
+      }
+      connections[edgeIndex] = connection;
     }
   }
   return connections;
@@ -810,32 +953,28 @@ function addOrderedRunningPartial(partials: number[], value: number): void {
   if (next !== 0) partials.push(next);
 }
 
-function orderedRunningTotal(partials: number[]): number {
-  let total = 0;
-  for (const partial of partials) total += partial;
-  return total;
-}
-
 /**
  * Finish a non-overlapping expansion with the half-even tie correction used
- * by robust fsum implementations. Ordered unit aggregation uses this finalizer
- * without changing the established moving-window running-sum semantics.
+ * by robust fsum implementations. Ordered moving windows and unit aggregation
+ * both use this finalizer so every expansion has the same rounding semantics.
  */
 function orderedExpansionTotal(partials: readonly number[]): number {
-  const remaining = [...partials];
-  if (remaining.length === 0) return 0;
+  if (partials.length === 0) return 0;
 
-  let high = remaining.pop()!;
+  let partialIndex = partials.length - 1;
+  let high = partials[partialIndex]!;
+  partialIndex -= 1;
   let low = 0;
-  while (remaining.length > 0) {
+  while (partialIndex >= 0) {
     const previousHigh = high;
-    const next = remaining.pop()!;
+    const next = partials[partialIndex]!;
+    partialIndex -= 1;
     high = previousHigh + next;
     if (!Number.isFinite(high)) return high;
     low = next - (high - previousHigh);
     if (low !== 0) break;
   }
-  const nextPartial = remaining[remaining.length - 1];
+  const nextPartial = partials[partialIndex];
   if (nextPartial !== undefined
     && ((low < 0 && nextPartial < 0) || (low > 0 && nextPartial > 0))) {
     const doubledLow = low * 2;
@@ -857,7 +996,7 @@ function updateOrderedRunningSum(
       direction * (values[index] ?? 0)
     );
   }
-  state.orderedRunningSum = state.orderedRunningPartials.map(orderedRunningTotal);
+  state.orderedRunningSum = state.orderedRunningPartials.map(orderedExpansionTotal);
 }
 
 function makeOrderedNoForwardConnections(
@@ -871,7 +1010,13 @@ function makeOrderedNoForwardConnections(
   const priorRowCount = Number.isFinite(priorLimit)
     ? state.orderedHistorySize
     : state.rowsSeen - 1;
-  const connections = orderedConnections(state.orderedRunningSum, entry.codeValues, internals.codes);
+  const connections = orderedConnections(
+    state.orderedRunningSum,
+    state.orderedRunningPartials,
+    entry.codeValues,
+    internals.codes,
+    internals.mask
+  );
 
   internals.rowWindowProvenance.push({
     responseRowIndex: entry.globalIndex,
@@ -1309,6 +1454,8 @@ function makeInternals(options: StreamingAccumulateOptions): StreamingInternals 
 }
 
 function ingestRow(internals: StreamingInternals, row: Row, globalIndex: number): void {
+  assertOrderedRawKeysDoNotCollide(internals, row, globalIndex);
+  assertOrderedIdentityValues(internals, row, globalIndex);
   const rowWithUnit = makeUnitRow(row, internals.units);
   assertOrderedUnitDisplayIsUnique(internals, rowWithUnit);
   if (internals.materialization === 'full') internals.rawRows.push(rowWithUnit);
