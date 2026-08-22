@@ -27,6 +27,7 @@ export type {
 export {
   adjacencyKey,
   meanColumns,
+  orderedAdjacencyKey,
   refWindowMatrix,
   rowsToCoOccurrences,
   skipSphereNorm,

@@ -11,6 +11,7 @@ import type {
   ENASet,
   MakeSetOptions,
   Matrix,
+  NetworkType,
   Row,
   RotationSet
 } from './types.js';
@@ -124,12 +125,23 @@ function makeRotation(enadata: ENAData, pointsForProjection: Matrix, options: Ma
   }
 }
 
-function makeNodePositions(lineWeights: Matrix, points: Matrix, codeCount: number, options: MakeSetOptions): NodePositionResult {
-  const method = options.nodePositionMethod ?? 'undirected';
+function makeNodePositions(
+  lineWeights: Matrix,
+  points: Matrix,
+  codeCount: number,
+  networkType: NetworkType,
+  options: MakeSetOptions
+): NodePositionResult {
+  const method = options.nodePositionMethod ?? (networkType === 'ordered' ? 'directed' : 'undirected');
+  if (networkType === 'ordered' && method === 'undirected') {
+    throw new Error(
+      'Ordered network analysis requires a directed node position method; got "undirected". ' +
+      'Omit nodePositionMethod to use "directed".'
+    );
+  }
   if (method !== 'undirected') {
-    // This pipeline only accumulates undirected upper-triangle adjacency
-    // vectors (n*(n-1)/2 columns); a directed solver needs n*n columns and
-    // would otherwise return silently wrong coordinates (advisory F-003).
+    // Directed solvers require full n*n adjacency vectors and must never be
+    // applied to standard upper-triangle ENA data (advisory F-003).
     const width = lineWeights[0]?.length ?? 0;
     if (width !== codeCount * codeCount) {
       throw new Error(
@@ -162,7 +174,13 @@ export function makeSet(enadata: ENAData, options: MakeSetOptions = {}): ENASet 
   // ALL rotated dimensions; only display output is truncated to `dimensions`.
   const fullPointsMatrix = multiplyMatrices(pointsForProjection, rotationResult.rotationMatrix);
   const pointsMatrix = selectMatrixColumns(fullPointsMatrix, dimCount);
-  const nodePositionResult = makeNodePositions(lineWeightsMatrix, pointsMatrix, enadata.codes.length, options);
+  const nodePositionResult = makeNodePositions(
+    lineWeightsMatrix,
+    pointsMatrix,
+    enadata.codes.length,
+    enadata.networkType ?? 'standard',
+    options
+  );
   const variances = varianceColumns(fullPointsMatrix);
   const varianceTotal = variances.reduce((sum, value) => sum + value, 0);
   const variance = Object.fromEntries(rotationResult.rotationColumns.map((name, index) => [name, varianceTotal === 0 ? 0 : (variances[index] ?? 0) / varianceTotal]));

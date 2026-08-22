@@ -6,6 +6,7 @@ import type { AccumulateOptions, MakeSetOptions, Matrix } from '../types.js';
 
 const MODELS = new Set(['EndPoint', 'AccumulatedTrajectory', 'SeparateTrajectory']);
 const WINDOWS = new Set(['MovingStanzaWindow', 'Conversation']);
+const NETWORK_TYPES = new Set(['standard', 'ordered']);
 const ROTATION_METHODS = new Set(['svd', 'mean', 'generalized', 'regression', 'regression2', 'hena', 'spherical']);
 const NODE_POSITION_METHODS = new Set(['undirected', 'directed', 'directed-ground-response']);
 
@@ -45,6 +46,9 @@ export function validateAccumulateOptions(
   if (!Array.isArray(options.codes) || options.codes.length < 2) {
     throw new Error(`codes must list at least 2 code columns to model co-occurrences; got ${Array.isArray(options.codes) ? options.codes.length : typeof options.codes}.`);
   }
+  if (options.networkType !== undefined && !NETWORK_TYPES.has(options.networkType)) {
+    throw new Error(`networkType must be one of ${[...NETWORK_TYPES].join(', ')}; got "${String(options.networkType)}".`);
+  }
   if (options.model !== undefined && !MODELS.has(options.model)) {
     throw new Error(`model must be one of ${[...MODELS].join(', ')}; got "${String(options.model)}".`);
   }
@@ -65,6 +69,29 @@ export function validateAccumulateOptions(
   }
   if (options.unitsUsed !== undefined && (!Array.isArray(options.unitsUsed) || options.unitsUsed.length === 0)) {
     throw new Error('unitsUsed must be a non-empty array of unit labels when provided; omit it to keep every unit.');
+  }
+
+  if (options.networkType === 'ordered') {
+    const model = options.model ?? 'EndPoint';
+    if (model !== 'EndPoint') {
+      throw new Error(`Ordered network analysis requires model "EndPoint"; got "${model}".`);
+    }
+    const window = options.window ?? 'MovingStanzaWindow';
+    if (window !== 'MovingStanzaWindow') {
+      throw new Error(`Ordered network analysis requires window "MovingStanzaWindow"; got "${window}".`);
+    }
+    const windowSizeBack = options.windowSizeBack ?? 1;
+    if (windowSizeBack !== Number.POSITIVE_INFINITY && (!Number.isInteger(windowSizeBack) || windowSizeBack < 1)) {
+      throw new Error(`Ordered network analysis requires windowSizeBack to be an integer >= 1 or Infinity; got ${String(windowSizeBack)}.`);
+    }
+    const windowSizeForward = options.windowSizeForward ?? 0;
+    if (windowSizeForward !== 0) {
+      throw new Error(`Ordered network analysis only supports backward windows; windowSizeForward must be 0; got ${String(windowSizeForward)}.`);
+    }
+    if (options.weightBy !== undefined && options.weightBy !== 'sum') {
+      const received = typeof options.weightBy === 'function' ? 'function' : `"${options.weightBy}"`;
+      throw new Error(`Ordered network analysis preserves raw code counts and requires weightBy "sum"; got ${received}.`);
+    }
   }
 }
 

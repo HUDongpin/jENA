@@ -35,7 +35,9 @@ function directedWeightsFromLineWeights(lineWeights: Matrix, numNodes: number): 
       for (let y = 0; y < numNodes; y += 1) {
         const value = adjacency[z] ?? 0;
         weights[x] = (weights[x] ?? 0) + value;
-        weights[y] = (weights[y] ?? 0) + value;
+        // A self edge is incident to one endpoint, not two. Non-self directed
+        // edges contribute once to their ground and response endpoints.
+        if (x !== y) weights[y] = (weights[y] ?? 0) + value;
         z += 1;
       }
     }

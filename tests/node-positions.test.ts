@@ -60,4 +60,18 @@ describe("directed node-position guards (advisory F-003)", () => {
     expect(result.nodes).toHaveLength(2);
     expect(result.centroids).toHaveLength(2);
   });
+
+  it("counts a directed self edge once and a non-self edge at both endpoints", () => {
+    // Ordered column-major order for A,B is A->A, B->A, A->B, B->B.
+    const directedLineWeights = [
+      [1, 0, 1, 0],
+      [0, 1, 0, 1]
+    ];
+    const result = directedNodePositions(directedLineWeights, [[0.1], [-0.2]]);
+
+    expect(result.weights[0]?.[0]).toBeCloseTo(2 / 3, 12);
+    expect(result.weights[0]?.[1]).toBeCloseTo(1 / 3, 12);
+    expect(result.weights[1]?.[0]).toBeCloseTo(1 / 3, 12);
+    expect(result.weights[1]?.[1]).toBeCloseTo(2 / 3, 12);
+  });
 });

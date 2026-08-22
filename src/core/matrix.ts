@@ -62,6 +62,32 @@ export function adjacencyKey(codes: string[]): AdjacencyKeyEntry[] {
   });
 }
 
+/**
+ * Full ordered adjacency in column-major matrix order: response/target is the
+ * outer loop and ground/source is the inner loop. Thus an edge at matrix row
+ * `groundIndex`, column `responseIndex` has flat index
+ * `responseIndex * codes.length + groundIndex`.
+ */
+export function orderedAdjacencyKey(codes: string[]): AdjacencyKeyEntry[] {
+  const entries: AdjacencyKeyEntry[] = [];
+  for (let responseIndex = 0; responseIndex < codes.length; responseIndex += 1) {
+    for (let groundIndex = 0; groundIndex < codes.length; groundIndex += 1) {
+      const source = codes[groundIndex] ?? String(groundIndex);
+      const target = codes[responseIndex] ?? String(responseIndex);
+      entries.push({
+        source,
+        target,
+        // Match the official ONA/R golden header convention. Direction is
+        // carried unambiguously by source/target and their indices.
+        name: `${source} & ${target}`,
+        sourceIndex: groundIndex,
+        targetIndex: responseIndex
+      });
+    }
+  }
+  return entries;
+}
+
 export function vectorToUpperTriangle(vector: number[]): number[] {
   const out: number[] = [];
   for (let i = 1; i < vector.length; i += 1) {

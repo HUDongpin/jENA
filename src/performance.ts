@@ -6,9 +6,21 @@
  * TypeScript translation and modifications for jena-js, GPL-3.0-only.
  * See PROVENANCE.md for the upstream NOTICE and version pin.
  */
-import type { AccumulateOptions, ENAData, Matrix, ModelType, Row, Scalar, WeightBy, WindowType } from './types.js';
+import type {
+  AccumulateOptions,
+  ENAData,
+  Matrix,
+  ModelType,
+  NetworkType,
+  OrderedWindowProvenance,
+  Row,
+  Scalar,
+  WeightBy,
+  WindowType
+} from './types.js';
 import {
   adjacencyKey,
+  orderedAdjacencyKey,
   stringVectorToUpperTriangle,
   sumColumns,
   vectorToUpperTriangle
@@ -72,6 +84,7 @@ interface MovingConversationState {
   buffer: StreamRowEntry[];
   noForwardHistory: number[][];
   noForwardRunningSum: number[];
+  orderedHistory: StreamRowEntry[];
 }
 
 interface ConversationAggregate {
@@ -95,6 +108,7 @@ interface MetadataState {
 }
 
 interface StreamingInternals {
+  networkType: NetworkType;
   model: ModelType;
   window: WindowType;
   weightBy: WeightBy;
@@ -113,6 +127,7 @@ interface StreamingInternals {
   unitFilter?: Set<string>;
   rawRows: Row[];
   rowConnectionRows: Array<{ index: number; row: Row }>;
+  rowWindowProvenance: OrderedWindowProvenance[];
   movingConversations: Map<string, MovingConversationState>;
   conversationAggregates: Map<string, ConversationAggregate>;
   conversationAggregateOrder: string[];
@@ -157,12 +172,16 @@ function normalizeModel(model: ModelType | undefined): ModelType {
   return model ?? 'EndPoint';
 }
 
+function normalizeNetworkType(networkType: NetworkType | undefined): NetworkType {
+  return networkType ?? 'standard';
+}
+
 function normalizeWindow(window: WindowType | undefined): WindowType {
   return window ?? 'MovingStanzaWindow';
 }
 
-function normalizeWeightBy(weightBy: WeightBy | undefined): WeightBy {
-  return weightBy ?? 'binary';
+function normalizeWeightBy(weightBy: WeightBy | undefined, networkType: NetworkType): WeightBy {
+  return weightBy ?? (networkType === 'ordered' ? 'sum' : 'binary');
 }
 
 function numeric(row: Row, column: string): number {
@@ -201,8 +220,16 @@ function makeUnitRow(row: Row, units: string[]): Row {
 // Flattens the upper triangle of the code mask once so masking a row is a
 // single elementwise multiply instead of an O(E^2) index scan per row
 // (advisory F-013 hot spot).
-function flattenMask(mask: Matrix): number[] {
+function flattenMask(mask: Matrix, networkType: NetworkType): number[] {
   const flat: number[] = [];
+  if (networkType === 'ordered') {
+    for (let response = 0; response < mask.length; response += 1) {
+      for (let ground = 0; ground < mask.length; ground += 1) {
+        flat.push(mask[ground]?.[response] ?? 1);
+      }
+    }
+    return flat;
+  }
   for (let target = 1; target < mask.length; target += 1) {
     for (let source = 0; source < target; source += 1) {
       flat.push(mask[source]?.[target] ?? 1);
@@ -344,6 +371,50 @@ function makeNoForwardCoOccurrence(state: MovingConversationState, entry: Stream
   return coOccurrenceFromSums(addVectors(previous, entry.codeValues), previous, binary);
 }
 
+function orderedConnections(prior: number[], response: number[]): number[] {
+  const width = response.length;
+  const connections = zeros(width * width);
+  for (let responseIndex = 0; responseIndex < width; responseIndex += 1) {
+    for (let groundIndex = 0; groundIndex < width; groundIndex += 1) {
+      const edgeIndex = responseIndex * width + groundIndex;
+      const lagged = (prior[groundIndex] ?? 0) * (response[responseIndex] ?? 0);
+      const sameRow = groundIndex === responseIndex
+        ? 0
+        : 0.5 * (response[groundIndex] ?? 0) * (response[responseIndex] ?? 0);
+      connections[edgeIndex] = lagged + sameRow;
+    }
+  }
+  return connections;
+}
+
+function makeOrderedNoForwardConnections(
+  state: MovingConversationState,
+  entry: StreamRowEntry,
+  internals: StreamingInternals
+): number[] {
+  const priorLimit = Number.isFinite(internals.windowSizeBack)
+    ? Math.max(0, internals.windowSizeBack - 1)
+    : Number.POSITIVE_INFINITY;
+  const priorEntries = priorLimit === 0
+    ? []
+    : Number.isFinite(priorLimit)
+      ? state.orderedHistory.slice(-priorLimit)
+      : state.orderedHistory;
+  const prior = sumCodeVectors(priorEntries.map((candidate) => candidate.codeValues), internals.codes.length);
+
+  internals.rowWindowProvenance.push({
+    responseRowIndex: entry.globalIndex,
+    horizon: state.key,
+    priorRowIndices: priorEntries.map((candidate) => candidate.globalIndex)
+  });
+
+  state.orderedHistory.push(entry);
+  if (Number.isFinite(priorLimit)) {
+    while (state.orderedHistory.length > priorLimit) state.orderedHistory.shift();
+  }
+  return orderedConnections(prior, entry.codeValues);
+}
+
 function rowsForLocalRange(state: MovingConversationState, earliest: number, last: number): number[][] {
   return state.buffer
     .filter((entry) => entry.localIndex >= earliest && entry.localIndex <= last)
@@ -421,7 +492,8 @@ function getMovingConversation(internals: StreamingInternals, key: string): Movi
       bufferOffset: 0,
       buffer: [],
       noForwardHistory: [],
-      noForwardRunningSum: zeros(internals.codes.length)
+      noForwardRunningSum: zeros(internals.codes.length),
+      orderedHistory: []
     };
     internals.movingConversations.set(key, state);
   }
@@ -440,7 +512,9 @@ function pushMovingRow(internals: StreamingInternals, row: Row, globalIndex: num
   state.rowsSeen += 1;
 
   if (internals.windowSizeForward === 0) {
-    const co = makeNoForwardCoOccurrence(state, entry, internals);
+    const co = internals.networkType === 'ordered'
+      ? makeOrderedNoForwardConnections(state, entry, internals)
+      : makeNoForwardCoOccurrence(state, entry, internals);
     consumeRowConnection(
       internals,
       globalIndex,
@@ -614,7 +688,9 @@ function finishInternals(internals: StreamingInternals): ENAData {
     units: internals.units,
     conversation: internals.conversation,
     codeColumns: internals.codeColumns,
-    adjacencyKey: adjacencyKey(internals.codes),
+    adjacencyKey: internals.networkType === 'ordered'
+      ? orderedAdjacencyKey(internals.codes)
+      : adjacencyKey(internals.codes),
     rawRows,
     rowConnectionCounts,
     connectionCounts: resultRows.connectionCounts,
@@ -633,13 +709,19 @@ function finishInternals(internals: StreamingInternals): ENAData {
   };
   const trajectoryRows = (resultRows as { trajectories?: Row[] }).trajectories;
   if (trajectoryRows) result.trajectories = trajectoryRows;
+  if (internals.networkType === 'ordered') {
+    result.networkType = 'ordered';
+    result.functionParams.networkType = 'ordered';
+    result.rowWindowProvenance = [...internals.rowWindowProvenance]
+      .sort((left, right) => left.responseRowIndex - right.responseRowIndex);
+  }
   return result;
 }
 
 function activeBufferedRows(internals: StreamingInternals): number {
   let total = 0;
   for (const state of internals.movingConversations.values()) {
-    total += state.buffer.length + state.noForwardHistory.length;
+    total += state.buffer.length + state.noForwardHistory.length + state.orderedHistory.length;
   }
   return total;
 }
@@ -653,15 +735,17 @@ function updateProgress(state: AccumulationChunkState, internals: StreamingInter
 }
 
 function makeInternals(options: StreamingAccumulateOptions): StreamingInternals {
+  const networkType = normalizeNetworkType(options.networkType);
   const model = normalizeModel(options.model);
   const window = normalizeWindow(options.window);
-  const weightBy = normalizeWeightBy(options.weightBy);
+  const weightBy = normalizeWeightBy(options.weightBy, networkType);
   const metadata = options.metadata ?? [];
   assertNonEmptyColumns(options.units, 'units');
   assertNonEmptyColumns(options.conversation, 'conversation');
   assertNonEmptyColumns(options.codes, 'codes');
   if (options.rows) assertRowsHaveColumns(options.rows, [...options.units, ...options.conversation, ...options.codes, ...metadata]);
   return {
+    networkType,
     model,
     window,
     weightBy,
@@ -674,11 +758,14 @@ function makeInternals(options: StreamingAccumulateOptions): StreamingInternals 
     conversation: options.conversation,
     codes: options.codes,
     metadata,
-    codeColumns: stringVectorToUpperTriangle(options.codes),
-    ...(options.mask ? { mask: flattenMask(options.mask) } : {}),
+    codeColumns: networkType === 'ordered'
+      ? orderedAdjacencyKey(options.codes).map((entry) => entry.name)
+      : stringVectorToUpperTriangle(options.codes),
+    ...(options.mask ? { mask: flattenMask(options.mask, networkType) } : {}),
     ...(options.unitsUsed ? { unitFilter: new Set(options.unitsUsed.map(String)) } : {}),
     rawRows: [],
     rowConnectionRows: [],
+    rowWindowProvenance: [],
     movingConversations: new Map(),
     conversationAggregates: new Map(),
     conversationAggregateOrder: [],

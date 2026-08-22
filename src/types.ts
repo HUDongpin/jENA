@@ -4,6 +4,7 @@ export type Matrix = number[][];
 
 export type ModelType = "EndPoint" | "AccumulatedTrajectory" | "SeparateTrajectory";
 export type WindowType = "MovingStanzaWindow" | "Conversation";
+export type NetworkType = "standard" | "ordered";
 /**
  * Weighting applied to each windowed co-occurrence cell BEFORE unit
  * accumulation. "binary" thresholds each window's cell to 0/1; "sum" keeps
@@ -69,6 +70,7 @@ export interface AccumulateOptions {
   conversation: string[];
   codes: string[];
   metadata?: string[];
+  networkType?: NetworkType;
   model?: ModelType;
   weightBy?: WeightBy;
   window?: WindowType;
@@ -87,7 +89,18 @@ export interface AdjacencyKeyEntry {
   targetIndex: number;
 }
 
+export interface OrderedWindowProvenance {
+  /** Zero-based input row receiving the ordered connection contribution. */
+  responseRowIndex: number;
+  /** Merged conversation-column value defining the response row's horizon. */
+  horizon: string;
+  /** Zero-based input rows used as prior context, oldest to newest. */
+  priorRowIndices: number[];
+}
+
 export interface ENAData {
+  /** Omitted for legacy standard results; absence means the default "standard" network. */
+  networkType?: NetworkType;
   modelType: ModelType;
   codes: string[];
   units: string[];
@@ -96,12 +109,15 @@ export interface ENAData {
   adjacencyKey: AdjacencyKeyEntry[];
   rawRows: Row[];
   rowConnectionCounts: Row[];
+  /** Ordered-only window provenance; retained even for model-only materialization. */
+  rowWindowProvenance?: OrderedWindowProvenance[];
   connectionCounts: Row[];
   connectionMatrix: Matrix;
   metaData: Row[];
   unitLabels: string[];
   trajectories?: Row[];
   functionParams: Required<Pick<AccumulateOptions, "model" | "weightBy" | "window" | "includeMeta">> & {
+    networkType?: NetworkType;
     windowSizeBack: number;
     windowSizeForward: number;
     unitsUsed?: string[];
