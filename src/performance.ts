@@ -530,6 +530,22 @@ function coOccurrenceFromSums(total: number[], subtract: number[] | undefined, b
 }
 
 function finalizeCoOccurrence(values: number[], internals: StreamingInternals): number[] {
+  if (internals.networkType === 'ordered') {
+    const codeCount = internals.codes.length;
+    for (let edgeIndex = 0; edgeIndex < values.length; edgeIndex += 1) {
+      const value = values[edgeIndex];
+      if (!Number.isFinite(value)) {
+        const groundIndex = edgeIndex % codeCount;
+        const responseIndex = Math.floor(edgeIndex / codeCount);
+        const ground = internals.codes[groundIndex] ?? String(groundIndex);
+        const response = internals.codes[responseIndex] ?? String(responseIndex);
+        throw new Error(
+          `Ordered network analysis derived a non-finite connection at edge index ${edgeIndex} ` +
+          `(${ground} -> ${response}); got ${String(value)}. Reduce raw code magnitudes so every connection product remains finite.`
+        );
+      }
+    }
+  }
   return applyWeight(applyMaskToCoOccurrence(values, internals.mask), internals.weightBy);
 }
 

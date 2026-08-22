@@ -157,7 +157,31 @@ export function dot(a: number[], b: number[]): number {
 }
 
 export function l2Norm(vector: number[]): number {
-  return Math.sqrt(dot(vector, vector));
+  let scale = 0;
+  let scaledSumSquares = 1;
+  let hasInfinity = false;
+
+  for (const value of vector) {
+    if (Number.isNaN(value)) return Number.NaN;
+    const magnitude = Math.abs(value);
+    if (magnitude === Number.POSITIVE_INFINITY) {
+      hasInfinity = true;
+      continue;
+    }
+    if (magnitude === 0) continue;
+
+    if (scale < magnitude) {
+      const ratio = scale / magnitude;
+      scaledSumSquares = 1 + scaledSumSquares * ratio * ratio;
+      scale = magnitude;
+    } else {
+      const ratio = magnitude / scale;
+      scaledSumSquares += ratio * ratio;
+    }
+  }
+
+  if (hasInfinity) return Number.POSITIVE_INFINITY;
+  return scale === 0 ? 0 : scale * Math.sqrt(scaledSumSquares);
 }
 
 export function refWindowMatrix(matrix: Matrix, windowSize = 1, windowForward = 0, binary = true): Matrix {

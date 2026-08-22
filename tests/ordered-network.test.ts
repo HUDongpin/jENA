@@ -753,6 +753,48 @@ describe("ordered network streaming and downstream modeling", () => {
     expect(implicit.centroids).toEqual(explicit.centroids);
   });
 
+  it("keeps finite 5e299 ordered edges nonzero through normalization and projection", () => {
+    const huge = 5e299;
+    const set = ena(orderedOptions([
+      { unit: "u1", horizon: "h1", A: huge, B: 0, C: 0 },
+      { unit: "u1", horizon: "h1", A: 0, B: 1, C: 0 },
+      { unit: "u2", horizon: "h2", A: huge, B: 0, C: 0 },
+      { unit: "u2", horizon: "h2", A: 0, B: 0, C: 1 },
+      { unit: "u3", horizon: "h3", A: 0, B: huge, C: 0 },
+      { unit: "u3", horizon: "h3", A: 0, B: 0, C: 1 }
+    ], {
+      codes: ["A", "B", "C"],
+      windowSizeBack: 2
+    }));
+
+    expect(edgeValue(set.connectionCounts[0]!, set, "A", "B")).toBe(huge);
+    expect(edgeValue(set.connectionCounts[1]!, set, "A", "C")).toBe(huge);
+    expect(edgeValue(set.connectionCounts[2]!, set, "B", "C")).toBe(huge);
+
+    const lineWeightRows = set.lineWeights.map((row) =>
+      set.codeColumns.map((column) => Number(row[column]))
+    );
+    expect(lineWeightRows.every((row) => row.every(Number.isFinite))).toBe(true);
+    expect(lineWeightRows.every((row) => row.some((value) => value !== 0))).toBe(true);
+    for (const row of lineWeightRows) expect(Math.hypot(...row)).toBeCloseTo(1, 15);
+
+    const pointColumns = set.rotation.rotationColumns.slice(0, 2);
+    const pointValues = set.points.flatMap((row) =>
+      pointColumns.map((column) => Number(row[column]))
+    );
+    expect(pointValues.every(Number.isFinite)).toBe(true);
+    expect(pointValues.some((value) => Math.abs(value) > 1e-12)).toBe(true);
+  });
+
+  it("rejects finite raw ordered counts whose derived edge is non-finite", () => {
+    expect(() => accumulateData(orderedOptions([
+      { unit: "u1", horizon: "h1", A: Number.MAX_VALUE, B: 0 },
+      { unit: "u1", horizon: "h1", A: 0, B: 2 }
+    ], { windowSizeBack: 2 }))).toThrowError(
+      /Ordered network analysis derived a non-finite connection at edge index 2 \(A -> B\); got Infinity\./
+    );
+  });
+
   it("rejects an explicitly undirected node-position solver for ordered data", () => {
     expect(() => ena({ ...options, nodePositionMethod: "undirected" }))
       .toThrowError('Ordered network analysis requires a directed node position method; got "undirected". Omit nodePositionMethod to use "directed".');
