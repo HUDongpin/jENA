@@ -682,6 +682,17 @@ function assertOrderedProductDidNotUnderflow(
   }
 }
 
+/**
+ * Compute half of a product without first halving its smaller-magnitude
+ * operand. For finite non-negative counts, this preserves every representable
+ * subnormal result and avoids an unscaled intermediate product overflow.
+ */
+function orderedHalfProduct(left: number, right: number): number {
+  return Math.abs(left) >= Math.abs(right)
+    ? (left * 0.5) * right
+    : left * (right * 0.5);
+}
+
 function orderedConnections(prior: number[], response: number[], codes: string[]): number[] {
   const width = response.length;
   const connections = zeros(width * width);
@@ -706,7 +717,7 @@ function orderedConnections(prior: number[], response: number[], codes: string[]
       let sameRow = 0;
       if (groundIndex !== responseIndex) {
         const currentGround = response[groundIndex] ?? 0;
-        sameRow = 0.5 * currentGround * currentResponse;
+        sameRow = orderedHalfProduct(currentGround, currentResponse);
         assertOrderedProductDidNotUnderflow(
           currentGround,
           currentResponse,
