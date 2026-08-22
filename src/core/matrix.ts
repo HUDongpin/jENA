@@ -156,13 +156,24 @@ export function dot(a: number[], b: number[]): number {
   return total;
 }
 
-export function l2Norm(vector: number[]): number {
+interface ScaledL2State {
+  scale: number;
+  scaledSumSquares: number;
+  hasNaN: boolean;
+  hasInfinity: boolean;
+}
+
+function scaledL2State(vector: number[]): ScaledL2State {
   let scale = 0;
   let scaledSumSquares = 1;
+  let hasNaN = false;
   let hasInfinity = false;
 
   for (const value of vector) {
-    if (Number.isNaN(value)) return Number.NaN;
+    if (Number.isNaN(value)) {
+      hasNaN = true;
+      continue;
+    }
     const magnitude = Math.abs(value);
     if (magnitude === Number.POSITIVE_INFINITY) {
       hasInfinity = true;
@@ -180,8 +191,14 @@ export function l2Norm(vector: number[]): number {
     }
   }
 
-  if (hasInfinity) return Number.POSITIVE_INFINITY;
-  return scale === 0 ? 0 : scale * Math.sqrt(scaledSumSquares);
+  return { scale, scaledSumSquares, hasNaN, hasInfinity };
+}
+
+export function l2Norm(vector: number[]): number {
+  const state = scaledL2State(vector);
+  if (state.hasNaN) return Number.NaN;
+  if (state.hasInfinity) return Number.POSITIVE_INFINITY;
+  return state.scale === 0 ? 0 : state.scale * Math.sqrt(state.scaledSumSquares);
 }
 
 export function refWindowMatrix(matrix: Matrix, windowSize = 1, windowForward = 0, binary = true): Matrix {
@@ -250,8 +267,13 @@ export function sphereNorm(matrix: Matrix): Matrix {
   assertRectangularMatrix(matrix);
   assertFiniteNumbers(matrix);
   return matrix.map((row) => {
-    const norm = l2Norm(row);
-    return norm > 0 ? row.map((value) => value / norm) : row.map(() => 0);
+    const state = scaledL2State(row);
+    if (state.hasInfinity) {
+      return row.map((value) => value / Number.POSITIVE_INFINITY);
+    }
+    if (state.scale === 0) return row.map(() => 0);
+    const scaledNorm = Math.sqrt(state.scaledSumSquares);
+    return row.map((value) => (value / state.scale) / scaledNorm);
   });
 }
 

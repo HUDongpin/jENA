@@ -53,6 +53,22 @@ describe("core matrix utilities ported from rENA", () => {
     expect(l2Norm([Number.NaN, 1])).toBeNaN();
     expect(l2Norm([Number.POSITIVE_INFINITY, 1])).toBe(Number.POSITIVE_INFINITY);
     expect(l2Norm([Number.NEGATIVE_INFINITY, 1])).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it("normalizes finite rows whose true L2 norm exceeds Number.MAX_VALUE", () => {
+    const vector = [1.3e308, 1.3e308];
+    const normalized = sphereNorm([vector])[0] ?? [];
+
+    expect(l2Norm(vector)).toBe(Number.POSITIVE_INFINITY);
+    expect(normalized[0]).toBeCloseTo(Math.SQRT1_2, 15);
+    expect(normalized[1]).toBeCloseTo(Math.SQRT1_2, 15);
+    expect(Math.hypot(...normalized)).toBeCloseTo(1, 15);
+  });
+
+  it("preserves zero and non-finite sphere-normalization contracts", () => {
+    expect(sphereNorm([[0, -0]])).toEqual([[0, 0]]);
+    expect(sphereNorm([[Number.POSITIVE_INFINITY, 1]])).toEqual([[Number.NaN, 0]]);
+    expect(sphereNorm([[Number.NEGATIVE_INFINITY, 1]])).toEqual([[Number.NaN, 0]]);
     expect(() => sphereNorm([[Number.NaN, 1]])).toThrowError(
       "matrix[0][0] must be a number, got NaN."
     );

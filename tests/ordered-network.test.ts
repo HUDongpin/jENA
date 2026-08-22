@@ -786,6 +786,30 @@ describe("ordered network streaming and downstream modeling", () => {
     expect(pointValues.some((value) => Math.abs(value) > 1e-12)).toBe(true);
   });
 
+  it("normalizes finite ordered edges whose combined L2 norm is unrepresentable", () => {
+    const huge = 1.3e308;
+    const set = ena(orderedOptions([
+      { unit: "u1", horizon: "h1", A: huge, B: 0, C: 0 },
+      { unit: "u1", horizon: "h1", A: 0, B: 1, C: 1 }
+    ], {
+      codes: ["A", "B", "C"],
+      windowSizeBack: 2
+    }));
+
+    expect(edgeValue(set.connectionCounts[0]!, set, "A", "B")).toBe(huge);
+    expect(edgeValue(set.connectionCounts[0]!, set, "A", "C")).toBe(huge);
+
+    const lineWeightRow = set.codeColumns.map((column) =>
+      Number(set.lineWeights[0]?.[column])
+    );
+    expect(lineWeightRow.every(Number.isFinite)).toBe(true);
+    expect(Math.hypot(...lineWeightRow)).toBeCloseTo(1, 15);
+    expect(edgeValue(set.lineWeights[0]!, set, "A", "B")).toBeCloseTo(Math.SQRT1_2, 15);
+    expect(edgeValue(set.lineWeights[0]!, set, "A", "C")).toBeCloseTo(Math.SQRT1_2, 15);
+    expect(edgeValue(set.lineWeights[0]!, set, "B", "C")).toBeGreaterThan(0);
+    expect(edgeValue(set.lineWeights[0]!, set, "C", "B")).toBeGreaterThan(0);
+  });
+
   it("rejects finite raw ordered counts whose derived edge is non-finite", () => {
     expect(() => accumulateData(orderedOptions([
       { unit: "u1", horizon: "h1", A: Number.MAX_VALUE, B: 0 },
