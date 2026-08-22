@@ -336,6 +336,7 @@ interface MovingConversationState {
   noForwardHistory: number[][];
   noForwardRunningSum: number[];
   orderedRunningSum: number[];
+  orderedRunningPartials: number[][];
   orderedPreviousRowIndex: number | null;
   orderedHistory: Array<StreamRowEntry | undefined>;
   orderedHistoryHead: number;
@@ -722,6 +723,61 @@ function orderedConnections(prior: number[], response: number[], codes: string[]
   return connections;
 }
 
+/**
+ * Add one finite term to a floating-point expansion. Each TwoSum step keeps
+ * the rounding residual as another partial, so adding an expired row with the
+ * opposite sign removes its exact binary value instead of subtracting from a
+ * previously rounded running total. Same-sign overflow terms remain separate
+ * and therefore can still be removed by a later finite-window eviction.
+ */
+function addOrderedRunningPartial(partials: number[], value: number): void {
+  if (value === 0) return;
+  let next = value;
+  let writeIndex = 0;
+  for (const existingValue of partials) {
+    let existing = existingValue;
+    if (Math.abs(next) < Math.abs(existing)) {
+      const swap = next;
+      next = existing;
+      existing = swap;
+    }
+    const high = next + existing;
+    if (!Number.isFinite(high)) {
+      partials[writeIndex] = existing;
+      writeIndex += 1;
+      continue;
+    }
+    const low = existing - (high - next);
+    if (low !== 0) {
+      partials[writeIndex] = low;
+      writeIndex += 1;
+    }
+    next = high;
+  }
+  partials.length = writeIndex;
+  if (next !== 0) partials.push(next);
+}
+
+function orderedRunningTotal(partials: number[]): number {
+  let total = 0;
+  for (const partial of partials) total += partial;
+  return total;
+}
+
+function updateOrderedRunningSum(
+  state: MovingConversationState,
+  values: number[],
+  direction: 1 | -1
+): void {
+  for (let index = 0; index < values.length; index += 1) {
+    addOrderedRunningPartial(
+      state.orderedRunningPartials[index] ?? (state.orderedRunningPartials[index] = []),
+      direction * (values[index] ?? 0)
+    );
+  }
+  state.orderedRunningSum = state.orderedRunningPartials.map(orderedRunningTotal);
+}
+
 function makeOrderedNoForwardConnections(
   state: MovingConversationState,
   entry: StreamRowEntry,
@@ -744,21 +800,24 @@ function makeOrderedNoForwardConnections(
   });
 
   state.orderedPreviousRowIndex = entry.globalIndex;
-  state.orderedRunningSum = addVectors(state.orderedRunningSum, entry.codeValues);
   if (Number.isFinite(priorLimit)) {
     if (priorLimit === 0) {
-      state.orderedRunningSum = subtractVectors(state.orderedRunningSum, entry.codeValues);
+      state.orderedRunningSum = zeros(internals.codes.length);
     } else if (state.orderedHistorySize < priorLimit) {
       state.orderedHistory.push(entry);
       state.orderedHistorySize += 1;
+      updateOrderedRunningSum(state, entry.codeValues, 1);
     } else {
       const removed = state.orderedHistory[state.orderedHistoryHead];
       if (removed) {
-        state.orderedRunningSum = subtractVectors(state.orderedRunningSum, removed.codeValues);
+        updateOrderedRunningSum(state, removed.codeValues, -1);
       }
       state.orderedHistory[state.orderedHistoryHead] = entry;
       state.orderedHistoryHead = (state.orderedHistoryHead + 1) % priorLimit;
+      updateOrderedRunningSum(state, entry.codeValues, 1);
     }
+  } else {
+    updateOrderedRunningSum(state, entry.codeValues, 1);
   }
   return connections;
 }
@@ -843,6 +902,7 @@ function getMovingConversation(internals: StreamingInternals, identityKey: strin
       noForwardHistory: [],
       noForwardRunningSum: zeros(internals.codes.length),
       orderedRunningSum: zeros(internals.codes.length),
+      orderedRunningPartials: Array.from({ length: internals.codes.length }, () => []),
       orderedPreviousRowIndex: null,
       orderedHistory: [],
       orderedHistoryHead: 0,
