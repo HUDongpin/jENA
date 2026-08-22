@@ -659,7 +659,7 @@ function addToAccumulator(
         throw new Error(`Ordered network analysis internal accumulator is missing edge index ${index}.`);
       }
       addOrderedRunningPartial(partials, value);
-      accumulator.sums[index] = orderedRunningTotal(partials);
+      accumulator.sums[index] = orderedExpansionTotal(partials);
     } else {
       accumulator.sums[index] = (accumulator.sums[index] ?? 0) + value;
     }
@@ -814,6 +814,36 @@ function orderedRunningTotal(partials: number[]): number {
   let total = 0;
   for (const partial of partials) total += partial;
   return total;
+}
+
+/**
+ * Finish a non-overlapping expansion with the half-even tie correction used
+ * by robust fsum implementations. Ordered unit aggregation uses this finalizer
+ * without changing the established moving-window running-sum semantics.
+ */
+function orderedExpansionTotal(partials: readonly number[]): number {
+  const remaining = [...partials];
+  if (remaining.length === 0) return 0;
+
+  let high = remaining.pop()!;
+  let low = 0;
+  while (remaining.length > 0) {
+    const previousHigh = high;
+    const next = remaining.pop()!;
+    high = previousHigh + next;
+    if (!Number.isFinite(high)) return high;
+    low = next - (high - previousHigh);
+    if (low !== 0) break;
+  }
+  const nextPartial = remaining[remaining.length - 1];
+  if (nextPartial !== undefined
+    && ((low < 0 && nextPartial < 0) || (low > 0 && nextPartial > 0))) {
+    const doubledLow = low * 2;
+    const adjusted = high + doubledLow;
+    if (!Number.isFinite(adjusted)) return adjusted;
+    if (adjusted - high === doubledLow) high = adjusted;
+  }
+  return high;
 }
 
 function updateOrderedRunningSum(
@@ -1070,7 +1100,7 @@ function finalizedAccumulatorSums(accumulator: CountAccumulator | undefined, int
   }
   return internals.codeColumns.map((_column, edgeIndex) => {
     const partials = accumulator?.orderedPartials?.[edgeIndex] ?? [];
-    const value = orderedRunningTotal(partials);
+    const value = orderedExpansionTotal(partials);
     if (!Number.isFinite(value)) {
       const codeCount = internals.codes.length;
       const groundIndex = edgeIndex % codeCount;

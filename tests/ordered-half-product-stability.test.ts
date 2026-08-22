@@ -120,6 +120,24 @@ describe.each(accumulationModes)("ordered half-product stability through $name a
     expect(edgeValue(largeLast, "A", "B")).toBe(10000000000000002);
   });
 
+  it("correctly rounds the final ordered unit expansion at a half-even boundary", () => {
+    const contributions = [
+      0.29967579286516555,
+      2.4386662459370223e-50,
+      0.976921868996141
+    ];
+    const rows = contributions.flatMap((magnitude, index): Row[] => [
+      { unit: "u1", horizon: `h${index}`, A: magnitude, B: 0 },
+      { unit: "u1", horizon: `h${index}`, A: 0, B: 1 }
+    ]);
+    const data = run({
+      ...optionsFor(rows, "ordered"),
+      windowSizeBack: 2
+    });
+
+    expect(edgeValue(data, "A", "B")).toBe(1.2765976618613066);
+  });
+
   it.each([
     { label: "negative", value: -1 },
     { label: "non-numeric", value: "not-a-count" },
