@@ -49,14 +49,22 @@ rENA's `prcomp(tol = 0)` drops exactly-zero components, so rENA may report fewer
 `solveLinearSystem` applies an unconditional ridge of 1e-10 to the normal equations; rENA uses `arma::solve(..., equilibrate)`. On well-conditioned systems the difference is far below test tolerances. Node positions, however, solve `(WᵀW) x = Wᵀ points`, and on small models this system can be **singular** — rENA itself warns `solve(): system is singular; attempting approx solution` on the bundled fixtures. Both solvers then approximate the same minimum-norm solution, agreeing only to a few 1e-6 (golden bound: 4e-6 + 2e-6·|value|). Two consequences:
 
 - Individual node coordinates on tiny/degenerate models are solver-sensitive at the 1e-6 level in both packages.
-- **Centroids are robust**: `centroids = W · nodes`, and the null-space component that makes nodes ambiguous is annihilated by W, so centroids (and `enaCorrelations`, which consumes them) match rENA to 1e-9.
+- **Centroids are robust**: `centroids = W · nodes`, and the null-space component that makes nodes ambiguous is annihilated by W, so centroids match rENA to 1e-9. Pearson over point and centroid differences stays at that bound. Spearman agreement can be looser when the same residuals cross an exact tie; see Spearman and exact ties below.
 
 ## Stats
 
 - `cohensD` is the exact port of `rENA::fun_cohens.d` (absolute mean difference / pooled SD): 1e-9 agreement.
-- `enaCorrelations` mirrors `rENA::ena.correlations` (Pearson/Spearman over all pairwise point/centroid differences): 1e-9 agreement. The confidence interval uses a Fisher-z construction with the pair count as n — rENA reports no CI; treat it as descriptive.
+- `enaCorrelations` mirrors `rENA::ena.correlations` (Pearson and Spearman over all pairwise point and centroid differences). Pearson agrees with rENA to 1e-9. Spearman agrees at that bound when both sides rank the same floats, and can differ below ~1e-4 when near-ties meet solver noise. The confidence interval uses a Fisher-z construction with the pair count as n — rENA reports no CI; treat it as descriptive.
 - `welchTTest` / `oneWayAnova` (via `enaStats`) match R's `t.test` statistic magnitude/df and `aov` F/df at 1e-9, but return **no p-values** — only statistics and degrees of freedom. Group order (and hence t sign) follows first appearance in the points table.
 - `inverseNormal` is Acklam's rational approximation (relative error < 1.15e-9), tested against R `qnorm` at 1e-8.
+
+### Spearman and exact ties
+
+`ranksTyped` assigns each run of equal values the average 1-based rank. A run is values that compare equal with `===`, the same tie convention as R `rank()` and therefore `cor(..., method = "spearman")`. On identical float inputs the two Spearman values match.
+
+Each package ranks its own coordinates. `enaCorrelations` applies Pearson to the ranks of every pairwise point difference and every pairwise centroid difference. Projected points can differ from an rENA run by about 1e-8; on a singular system, node coordinates can differ by more, and centroids inherit a smaller residual (Linear solves and node positions). A pairwise difference that is an exact tie on one side can sit a few ulps away on the other. Exact equality then either assigns one average rank or two consecutive ranks, an O(1) change in a few entries of the rank vector, and the correlation moves by about 1e-5. Pearson is continuous in those differences, so the same coordinate noise leaves it near 1e-12.
+
+On near-tied data, Spearman against rENA may therefore differ below about 1e-4. Pearson remains the cross-implementation check. The rank comparison stays exact equality. A tolerance around ties would treat rENA's accidental exact ties as ties in jena's coordinates, which is not the goodness-of-fit `enaCorrelations` reports. Closed as not planned in [jENA#1](https://github.com/HUDongpin/jENA/issues/1).
 
 ## Regression and generalized rotations (verified)
 
@@ -105,5 +113,6 @@ R model formulas in the regression rotations are parsed by a simplified parser (
 | Node positions | 4e-6 + 2e-6·\|value\| (singular systems; see above) |
 | Variance shares (renormalized over commonly-spanned directions) | 1e-9 |
 | Rotation matrix columns (up to sign, commonly-spanned directions only) | 5e-7 |
-| Correlations, Cohen's d, t/F statistics | 1e-9 |
+| Pearson correlations, Cohen's d, t/F statistics | 1e-9 |
+| Spearman correlations | 1e-9 on identical inputs; below ~1e-4 vs rENA when near-ties meet solver noise |
 | Normal quantiles | 1e-8 relative |
